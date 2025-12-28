@@ -8,28 +8,45 @@ description: >
   keyframe generation, or video prompt writing. Follows a philosophy-first
   approach: establish visual style and production philosophy, then execute
   scene by scene with user feedback at each stage.
-allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, TodoWrite
 ---
 
 # AI Video Producer
 
 Create professional AI-generated videos through a structured, iterative workflow.
 
-## Workflow Overview
+## MANDATORY WORKFLOW REQUIREMENTS
 
-1. **Production Philosophy** - Define visual style, motion language, and narrative approach
-2. **Scene Breakdown** - Decompose video into scenes with keyframe requirements
-3. **Keyframe Generation** - Create start/end frames with visual consistency
-4. **Video Synthesis** - Generate video segments using Veo API
-5. **Review & Iterate** - Refine based on user feedback
+**YOU MUST FOLLOW THESE RULES:**
 
-## Phase 1: Production Philosophy
+1. **ALWAYS use TodoWrite** at the start to create a task list for the entire workflow
+2. **NEVER skip phases** - complete each phase in order before proceeding
+3. **ALWAYS create required files** - philosophy.md, style.json, and scene-breakdown.md are REQUIRED
+4. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 8 seconds
+5. **ALWAYS ask user for approval** before proceeding to the next phase
+6. **NEVER generate video without scene breakdown** - plan first, execute second
 
-Before generating any assets, establish a **Production Philosophy** document. This ensures visual coherence across all scenes.
+## Workflow Phases (MUST COMPLETE IN ORDER)
 
-### Philosophy Template
+| Phase | Required Outputs | Checkpoint |
+|-------|------------------|------------|
+| 1. Production Philosophy | `philosophy.md`, `style.json` | Ask user to review before Phase 2 |
+| 2. Scene Breakdown | `scene-breakdown.md` | Ask user to approve scene plan before Phase 3 |
+| 3. Keyframe Generation | `scene-XX/keyframe-*.png` | Show user each keyframe, get approval |
+| 4. Video Synthesis | `scene-XX/video.mp4` | Show user each video segment |
+| 5. Review & Iterate | Refinements as needed | User signs off on final result |
 
-Create a markdown file capturing these elements:
+---
+
+## Phase 1: Production Philosophy (REQUIRED)
+
+**DO NOT PROCEED TO PHASE 2 UNTIL BOTH FILES EXIST:**
+- `{output_dir}/philosophy.md`
+- `{output_dir}/style.json`
+
+### Step 1.1: Create philosophy.md
+
+Create this file with ALL sections filled in:
 
 ```markdown
 # Production Philosophy: [Project Name]
@@ -55,238 +72,284 @@ Create a markdown file capturing these elements:
 - **Maintain**: [elements that must stay consistent]
 ```
 
-Save this as `outputs/philosophy.md` or include in style configuration JSON.
+### Step 1.2: Create style.json
 
-### Style Configuration (JSON)
-
-For programmatic use, create a style config:
+Create this file for programmatic use with generation scripts:
 
 ```json
 {
-  "project_name": "My Video Project",
+  "project_name": "Project Name Here",
   "visual_style": {
-    "art_style": "cinematic realistic with subtle stylization",
-    "color_palette": "warm earth tones with teal accents",
-    "lighting": "golden hour, soft shadows",
-    "composition": "wide establishing shots, intimate close-ups"
+    "art_style": "description",
+    "color_palette": "description",
+    "lighting": "description",
+    "composition": "description"
   },
   "motion_language": {
-    "movement_quality": "smooth and fluid",
-    "pacing": "contemplative with dynamic peaks",
-    "camera_style": "slow tracking shots, occasional static frames"
+    "movement_quality": "description",
+    "pacing": "description",
+    "camera_style": "description"
   },
   "subject_consistency": {
-    "main_subject": "description here",
-    "environment": "description here"
+    "main_subject": "detailed description",
+    "environment": "detailed description"
   },
   "constraints": {
-    "avoid": ["text overlays", "rapid cuts", "dutch angles"],
-    "maintain": ["consistent lighting direction", "color grade"]
+    "avoid": ["list", "of", "things"],
+    "maintain": ["list", "of", "things"]
   }
 }
 ```
 
-Save to `outputs/style.json` for use with generation scripts.
+### Step 1.3: CHECKPOINT - Get User Approval
 
-## Phase 2: Scene Breakdown
+**STOP and ask the user:**
+> "I've created the production philosophy. Please review `philosophy.md` and `style.json`. Should I proceed to scene breakdown, or would you like any changes?"
 
-Break the video into discrete scenes, identifying keyframe requirements.
+---
 
-### Scene Planning Template
+## Phase 2: Scene Breakdown (REQUIRED)
+
+**DO NOT PROCEED TO PHASE 3 UNTIL `scene-breakdown.md` EXISTS AND USER APPROVES**
+
+### Step 2.1: Analyze Video Requirements
+
+Before creating scenes, determine:
+- Total video duration needed
+- Number of scenes required (minimum 2 for videos > 8 seconds)
+- Key story beats or content moments
+- Transitions between scenes
+
+### Step 2.2: Create scene-breakdown.md
+
+**MANDATORY FORMAT - Include ALL scenes:**
 
 ```markdown
-## Scene [N]: [Title]
+# Scene Breakdown: [Project Name]
+
+## Overview
+- **Total Duration**: [X seconds]
+- **Number of Scenes**: [N]
+- **Video Type**: [promotional/narrative/educational/etc.]
+
+---
+
+## Scene 1: [Title]
 
 **Duration**: [X seconds]
 **Purpose**: [What this scene communicates]
 
 **Keyframes Required**:
-- Start frame: [description]
-- End frame: [description] (if using dual-frame mode)
+- Start frame: [detailed description]
+- End frame: [detailed description if using dual-frame mode]
 
 **Motion Description**:
-[What happens during this scene]
+[Specific actions and movements that occur]
 
-**Audio Notes**:
-[Music, sound effects, dialogue cues]
+**Camera**: [static/tracking/pan/zoom - be specific]
 
-**Transition**:
-[How this connects to next scene]
+**Transition to Next**: [cut/fade/continuous]
+
+---
+
+## Scene 2: [Title]
+
+[Same format as Scene 1]
+
+---
+
+[Continue for all scenes...]
+
+---
+
+## Generation Strategy
+
+| Scene | Mode | Keyframes | Notes |
+|-------|------|-----------|-------|
+| 1 | [single/dual/text-only] | [1-2] | [any special notes] |
+| 2 | [single/dual/text-only] | [1-2] | [any special notes] |
 ```
 
-### Generation Strategy Selection
+### Scene Count Guidelines
 
-| Scenario | Strategy | Keyframes Needed |
-|----------|----------|------------------|
-| Continuous motion (running, flying) | Single-frame (start) | 1 |
-| Ambient/atmospheric | Single-frame (end) | 1 |
-| Precise action/transformation | Dual-frame | 2 |
-| Long take (>8 seconds) | Multi-segment | 3+ |
+| Total Video Length | Minimum Scenes | Recommended Scenes |
+|--------------------|----------------|-------------------|
+| 1-8 seconds | 1 | 1-2 |
+| 9-16 seconds | 2 | 2-3 |
+| 17-24 seconds | 3 | 3-4 |
+| 25-40 seconds | 4 | 4-5 |
+| 40+ seconds | 5+ | Break into logical story beats |
 
-For **long takes**, chain keyframes: A → B → C → D, generating A→B, B→C, C→D separately.
+### Step 2.3: CHECKPOINT - Get User Approval
+
+**STOP and ask the user:**
+> "I've created the scene breakdown with [N] scenes. Please review `scene-breakdown.md`. Should I proceed to generate keyframes, or would you like to adjust the scenes?"
+
+---
 
 ## Phase 3: Keyframe Generation
 
-Generate keyframe images using Gemini API.
+**FOR EACH SCENE, generate keyframes before moving to the next scene.**
 
-### Using the Generation Script
+### Step 3.1: Set Up Scene Directory
 
 ```bash
-# Set API key first
-export GOOGLE_API_KEY="your-key-here"
-
-# Generate a keyframe
-python {baseDir}/scripts/gemini_image.py \
-  --prompt "A warrior standing in defensive stance, golden hour lighting, cinematic" \
-  --style-ref outputs/style.json \
-  --output outputs/scene-01/keyframe-start.png
-
-# With reference images for consistency
-python {baseDir}/scripts/gemini_image.py \
-  --prompt "Same warrior now mid-attack, motion blur on sword" \
-  --reference outputs/character-ref.png \
-  --style-ref outputs/style.json \
-  --output outputs/scene-01/keyframe-end.png
+mkdir -p {output_dir}/scene-01
+mkdir -p {output_dir}/scene-02
+# ... for each scene
 ```
 
-### Keyframe Quality Checklist
+### Step 3.2: Generate Keyframes Per Scene
 
-Before proceeding to video generation, verify:
+```bash
+export GOOGLE_API_KEY="your-key-here"
 
+# Generate start keyframe
+python {baseDir}/scripts/gemini_image.py \
+  --prompt "[Detailed prompt from scene-breakdown.md]" \
+  --style-ref {output_dir}/style.json \
+  --output {output_dir}/scene-01/keyframe-start.png
+
+# Generate end keyframe (if using dual-frame mode)
+python {baseDir}/scripts/gemini_image.py \
+  --prompt "[Detailed prompt from scene-breakdown.md]" \
+  --style-ref {output_dir}/style.json \
+  --reference {output_dir}/scene-01/keyframe-start.png \
+  --output {output_dir}/scene-01/keyframe-end.png
+```
+
+### Step 3.3: Keyframe Quality Checklist
+
+Before proceeding to video, verify EACH keyframe:
 - [ ] Subject appears correctly (no distortion)
 - [ ] Style matches Production Philosophy
 - [ ] Composition allows for intended motion
-- [ ] All necessary visual information is present
+- [ ] Consistent with other keyframes in the project
 - [ ] Lighting direction is consistent
 
-**Critical**: If the subject will rotate significantly, ensure front-facing reference exists. Veo cannot hallucinate unseen angles accurately.
+### Step 3.4: CHECKPOINT - Show User Each Keyframe
 
-## Phase 4: Video Generation
+**After generating keyframes for a scene, STOP and inform the user:**
+> "Generated keyframes for Scene [N]. The files are at:
+> - `scene-XX/keyframe-start.png`
+> - `scene-XX/keyframe-end.png` (if applicable)
+>
+> Please review. Should I proceed to generate the video for this scene?"
 
-Generate videos using Veo API with prepared keyframes.
+---
 
-### Generation Commands
+## Phase 4: Video Synthesis
 
-**Single-frame mode** (continuous motion):
+**Generate video for EACH scene according to the scene breakdown.**
+
+### Step 4.1: Generate Video Per Scene
+
+**Single-frame mode:**
 ```bash
 python {baseDir}/scripts/veo_video.py \
-  --prompt "The warrior charges forward, cape flowing behind" \
-  --start-frame outputs/scene-01/keyframe-start.png \
-  --style-ref outputs/style.json \
-  --duration 8 \
-  --output outputs/scene-01/video.mp4
+  --prompt "[Motion description from scene-breakdown.md]" \
+  --start-frame {output_dir}/scene-01/keyframe-start.png \
+  --style-ref {output_dir}/style.json \
+  --duration [duration from scene-breakdown] \
+  --output {output_dir}/scene-01/video.mp4
 ```
 
-**Dual-frame mode** (precise control):
+**Dual-frame mode:**
 ```bash
 python {baseDir}/scripts/veo_video.py \
-  --prompt "Warrior swings sword in powerful arc, enemies react" \
-  --start-frame outputs/scene-01/keyframe-start.png \
-  --end-frame outputs/scene-01/keyframe-end.png \
-  --style-ref outputs/style.json \
-  --output outputs/scene-01/video.mp4
+  --prompt "[Motion description from scene-breakdown.md]" \
+  --start-frame {output_dir}/scene-01/keyframe-start.png \
+  --end-frame {output_dir}/scene-01/keyframe-end.png \
+  --style-ref {output_dir}/style.json \
+  --duration [duration from scene-breakdown] \
+  --output {output_dir}/scene-01/video.mp4
 ```
 
-**Text-to-video** (no keyframes):
-```bash
-python {baseDir}/scripts/veo_video.py \
-  --prompt "Sweeping aerial shot of mountain landscape at dawn" \
-  --duration 8 \
-  --resolution 1080p \
-  --output outputs/scene-01/video.mp4
-```
+### Step 4.2: CHECKPOINT - Show User Each Video
 
-### Check Generation Status
+**After each video generation, inform the user:**
+> "Generated video for Scene [N]: `scene-XX/video.mp4`
+> Duration: [X seconds]
+>
+> Please review. Any issues to address before proceeding to the next scene?"
 
-```bash
-python {baseDir}/scripts/status_checker.py list
-python {baseDir}/scripts/status_checker.py check [operation-name]
-```
+### Step 4.3: Repeat for All Scenes
+
+Continue generating keyframes and videos for each scene in the breakdown.
+
+---
 
 ## Phase 5: Review & Iterate
 
-After each generation, review with the user and refine as needed.
+### Step 5.1: Summary for User
 
-### Common Issues and Solutions
-
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| Subject distortion on rotation | Missing front-facing reference | Add intermediate keyframe |
-| Style drift between scenes | Inconsistent prompts | Reinforce style in each prompt |
-| Unnatural motion | Vague motion description | Add specific motion constraints |
-| Wrong subject position | Ambiguous spatial language | Use explicit directional terms |
-
-### Iteration Workflow
-
-1. Review generated video with user
-2. Identify specific issues
-3. Adjust keyframes OR prompts (not both simultaneously)
-4. Regenerate
-5. Repeat until satisfactory
-
-## Prompt Engineering Guidelines
-
-### Effective Motion Prompts
-
-**Do:**
-- Describe the action trajectory: "moves from left to right"
-- Specify speed: "slowly raises hand" vs "quickly dodges"
-- Include environmental interaction: "dust kicks up as they land"
-- Add directional constraints: "character faces camera throughout"
-
-**Don't:**
-- Use ambiguous terms: "character does something cool"
-- Assume implied actions: be explicit about every motion
-- Contradict keyframe content
-- Request impossible physics without indication
-
-### Prompt Structure
+After all scenes are complete, provide a summary:
 
 ```
-[Subject description]. [Action/motion]. [Environmental details]. [Style reinforcement]. [Constraints].
+## Generation Complete
+
+**Files Created:**
+- philosophy.md
+- style.json
+- scene-breakdown.md
+- scene-01/keyframe-start.png, keyframe-end.png, video.mp4
+- scene-02/keyframe-start.png, keyframe-end.png, video.mp4
+- [etc.]
+
+**Total Duration**: [sum of all scene durations]
+**Number of Scenes**: [N]
+
+The videos are ready for assembly in a video editor.
 ```
 
-Example:
-```
-A young woman in a blue dress stands at the edge of a cliff.
-She slowly raises her arms as wind catches her hair.
-Ocean waves crash against rocks below, sea spray visible.
-Cinematic wide shot, golden hour lighting, film grain.
-Character remains facing the ocean throughout, no rotation.
-```
+### Step 5.2: Handle Iteration Requests
 
-## Output Organization
+If user requests changes:
+1. Identify which scene(s) need modification
+2. Determine if keyframe or prompt adjustment is needed
+3. Regenerate only the affected assets
+4. Never adjust both keyframes AND prompts simultaneously
 
-Recommended directory structure:
+---
+
+## Output Directory Structure (REQUIRED)
 
 ```
-outputs/
-├── philosophy.md           # Production philosophy document
-├── style.json             # Style configuration
-├── scene-breakdown.md     # Full scene breakdown
+{output_dir}/
+├── philosophy.md           # REQUIRED - Production philosophy
+├── style.json             # REQUIRED - Style configuration
+├── scene-breakdown.md     # REQUIRED - Full scene breakdown
 ├── scene-01/
 │   ├── keyframe-start.png
 │   ├── keyframe-end.png   # If using dual-frame
 │   └── video.mp4
 ├── scene-02/
-│   └── ...
-└── final/
-    └── assembly-notes.md  # Notes for final editing
+│   ├── keyframe-start.png
+│   ├── keyframe-end.png
+│   └── video.mp4
+└── [additional scenes...]
 ```
 
-## Video Types Reference
+---
 
-This workflow adapts to any video type:
+## TodoWrite Template
 
-- **Promotional**: Focus on product shots, benefit visualization
-- **Educational**: Clear demonstrations, step-by-step sequences
-- **Narrative**: Character consistency, emotional beats, story arc
-- **Social Media**: Hook in first 2 seconds, vertical format (9:16)
-- **Music Video**: Beat-synchronized transitions, visual rhythm
-- **Product Demo**: Feature highlights, use-case scenarios
-- **Game Trailer**: Action sequences, atmosphere, gameplay hints
+At the START of the workflow, create this todo list:
 
-Adjust Production Philosophy and Scene Breakdown to match the specific video type.
+```
+1. Create philosophy.md
+2. Create style.json
+3. Get user approval on production philosophy
+4. Create scene-breakdown.md
+5. Get user approval on scene breakdown
+6. Generate Scene 1 keyframes
+7. Get user approval on Scene 1 keyframes
+8. Generate Scene 1 video
+9. [Repeat 6-8 for each scene]
+10. Provide final summary to user
+```
+
+---
 
 ## Quick Reference
 
