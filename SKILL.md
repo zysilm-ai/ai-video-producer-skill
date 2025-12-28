@@ -269,17 +269,53 @@ Before proceeding to video, verify EACH keyframe:
 - [ ] **Characters are consistent with reference keyframes**
 - [ ] **Background/environment is consistent with reference keyframes**
 - [ ] Lighting direction is consistent
+- [ ] **CRITICAL: Character POSITIONS are correct (left/right placement)**
 
 **If consistency check fails**: Regenerate the keyframe with the same reference images. Do NOT proceed with inconsistent keyframes.
 
-### Step 3.4: CHECKPOINT - Show User Each Keyframe
+### Step 3.4: MANDATORY CHECKPOINT - Human Review After EACH Keyframe
 
-**After generating keyframes for a scene, STOP and inform the user:**
-> "Generated keyframes for Scene [N]. The files are at:
-> - `scene-XX/keyframe-start.png`
-> - `scene-XX/keyframe-end.png` (if applicable)
+**IMPORTANT: Spatial positioning (left/right) is a known limitation of image generation models.**
+The model may swap character positions even with reference images. Human review is REQUIRED.
+
+**After generating EACH keyframe (not just each scene), you MUST:**
+
+1. **Show the keyframe to the user** (provide file path)
+2. **Ask user to verify these critical points:**
+   - Are character positions correct? (e.g., "Character A on LEFT, Character B on RIGHT")
+   - Does it match the previous keyframe's spatial layout?
+   - Are characters/background consistent with reference?
+
+3. **Use AskUserQuestion with these options:**
+   - "Approve - positions and consistency look good"
+   - "Regenerate - positions are swapped/incorrect"
+   - "Regenerate - character/style inconsistency"
+   - "Adjust prompt - need different composition"
+
+**Example checkpoint message:**
+> "Generated keyframe: `scene-02/keyframe-start.png`
 >
-> Please review. Should I proceed to generate the video for this scene?"
+> **Please verify spatial positions:**
+> - Expected: Athena (purple hair) on LEFT, Yuri (karate gi) on RIGHT
+> - Check: Does this match the previous keyframe's layout?
+>
+> If positions are swapped or incorrect, I will regenerate with the same reference."
+
+**Regeneration loop:**
+- If user requests regeneration, regenerate with SAME prompt and reference
+- Repeat checkpoint until user approves
+- Do NOT proceed to next keyframe or video until current keyframe is approved
+
+### Step 3.5: Position Verification Between Scenes
+
+**Before generating Scene N+1 keyframes:**
+1. Review the approved Scene N end keyframe
+2. Note exact character positions (left/right)
+3. Include explicit position instructions in Scene N+1 prompts:
+   ```
+   "Continuing from previous frame: [Character A] remains on the LEFT side,
+   [Character B] remains on the RIGHT side. Maintain exact same positioning."
+   ```
 
 ---
 
