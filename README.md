@@ -1,4 +1,4 @@
-# AI Video Producer
+# Gemini Video Producer Skill
 
 A Claude Code skill for complete AI video production workflows using Google Gemini and Veo APIs.
 
@@ -61,10 +61,10 @@ Copy this skill to your Claude Code skills directory:
 
 ```bash
 # Personal skills (available in all projects)
-cp -r ai-video-producer ~/.claude/skills/
+cp -r gemini-video-producer-skill ~/.claude/skills/
 
 # Or project-specific skills
-cp -r ai-video-producer /path/to/your/project/.claude/skills/
+cp -r gemini-video-producer-skill /path/to/your/project/.claude/skills/
 ```
 
 ### For Other Environments
@@ -72,7 +72,7 @@ cp -r ai-video-producer /path/to/your/project/.claude/skills/
 The scripts can be used standalone without Claude Code:
 
 ```bash
-cd ai-video-producer
+cd gemini-video-producer-skill
 
 # Generate an image
 python scripts/gemini_image.py --prompt "A sunset over mountains" --output sunset.png
@@ -157,7 +157,7 @@ Review the generated video. If adjustments are needed:
 ## Directory Structure
 
 ```
-ai-video-producer/
+gemini-video-producer-skill/
 ├── SKILL.md                 # Core skill instructions for Claude
 ├── README.md                # This file
 ├── requirements.txt         # Python dependencies
