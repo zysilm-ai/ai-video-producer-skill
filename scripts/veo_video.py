@@ -90,21 +90,21 @@ def generate_video(
     print_status(f"Prompt: {enhanced_prompt[:100]}...")
 
     # Build generation config
-    generate_config = {
-        "prompt": enhanced_prompt,
+    video_config_params = {
+        "number_of_videos": 1,
         "duration_seconds": min(duration, 8),
-        "resolution": resolution,
     }
 
-    # Add frame references if provided
+    # Prepare image parameter for start frame
+    start_img = None
     if start_frame:
-        start_img = types.Image.from_file(start_frame)
-        generate_config["first_frame"] = start_img
+        start_img = types.Image.from_file(location=start_frame)
         print_status(f"Start frame: {start_frame}")
 
+    # Add end frame to config if provided
     if end_frame:
-        end_img = types.Image.from_file(end_frame)
-        generate_config["last_frame"] = end_img
+        end_img = types.Image.from_file(location=end_frame)
+        video_config_params["last_frame"] = end_img
         print_status(f"End frame: {end_frame}")
 
     # Start generation
@@ -113,9 +113,11 @@ def generate_video(
 
     try:
         # Submit async generation job
-        operation = client.models.generate_video(
+        operation = client.models.generate_videos(
             model=model,
-            **generate_config
+            prompt=enhanced_prompt,
+            image=start_img,
+            config=types.GenerateVideosConfig(**video_config_params)
         )
 
         print_status(f"Job submitted. Waiting for completion...", "progress")
@@ -129,7 +131,8 @@ def generate_video(
             # Refresh operation status
             operation = client.operations.get(operation)
 
-            status_msg = f"Status: {operation.metadata.get('state', 'processing')} ({format_duration(elapsed)})"
+            state = operation.metadata.get('state', 'processing') if operation.metadata else 'processing'
+            status_msg = f"Status: {state} ({format_duration(elapsed)})"
             print_status(status_msg, "progress")
 
         if not operation.done:
@@ -146,12 +149,11 @@ def generate_video(
 
         result = operation.result
         if hasattr(result, 'generated_videos') and result.generated_videos:
-            video = result.generated_videos[0]
+            generated_video = result.generated_videos[0]
 
-            # Download video content
-            video_data = client.files.download(video.video)
-            with open(output, "wb") as f:
-                f.write(video_data)
+            # Download and save video content
+            client.files.download(file=generated_video.video)
+            generated_video.video.save(str(output))
 
             total_time = time.time() - start_time
             print_status(f"Video saved to: {output_path} ({format_duration(total_time)})", "success")
