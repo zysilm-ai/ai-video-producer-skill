@@ -11,15 +11,18 @@ from pathlib import Path
 try:
     from google import genai
     from google.genai import types
-except ImportError:
-    print("Error: google-genai package not installed", file=sys.stderr)
-    print("Install with: pip install google-genai", file=sys.stderr)
+    from PIL import Image
+except ImportError as e:
+    if "PIL" in str(e):
+        print("Error: Pillow package not installed", file=sys.stderr)
+        print("Install with: pip install Pillow", file=sys.stderr)
+    else:
+        print("Error: google-genai package not installed", file=sys.stderr)
+        print("Install with: pip install google-genai", file=sys.stderr)
     sys.exit(1)
 
 from utils import (
     get_api_key,
-    load_image_as_base64,
-    get_mime_type,
     load_style_config,
     ensure_output_dir,
     print_status,
@@ -65,22 +68,30 @@ def generate_image(
     enhanced_prompt = build_enhanced_prompt(prompt, style_config)
     print_status(f"Generating image with prompt: {enhanced_prompt[:100]}...")
 
-    # Build content parts
-    contents = [enhanced_prompt]
+    # Build content parts - reference images first, then prompt
+    contents = []
 
-    # Add reference images if provided
+    # Add reference images if provided (for character/style consistency)
     if reference_images:
         for img_path in reference_images:
             try:
-                img_data = load_image_as_base64(img_path)
-                mime_type = get_mime_type(img_path)
-                contents.insert(0, types.Part.from_bytes(
-                    data=bytes.fromhex(img_data) if len(img_data) % 2 == 0 else load_image_as_base64(img_path).encode(),
-                    mime_type=mime_type
-                ))
+                if not Path(img_path).exists():
+                    raise FileNotFoundError(f"Image not found: {img_path}")
+                # Use PIL.Image.open() as per Google's API documentation
+                img = Image.open(img_path)
+                contents.append(img)
                 print_status(f"Added reference image: {img_path}")
             except FileNotFoundError:
                 print_status(f"Reference image not found: {img_path}", "warning")
+            except Exception as e:
+                print_status(f"Failed to load reference image {img_path}: {e}", "warning")
+
+    # Add the prompt after reference images
+    # Include instruction to maintain consistency if references provided
+    if reference_images and len(contents) > 0:
+        enhanced_prompt = f"Using the reference image(s) provided, maintain character and style consistency. {enhanced_prompt}"
+
+    contents.append(enhanced_prompt)
 
     # Generate image
     print_status("Calling Gemini API...", "progress")

@@ -191,6 +191,23 @@ Before creating scenes, determine:
 
 **FOR EACH SCENE, generate keyframes before moving to the next scene.**
 
+### CRITICAL: Reference Image Rules for Consistency
+
+**YOU MUST follow these rules to maintain character/background consistency:**
+
+1. **First keyframe of Scene 1**: No reference needed (establishes the visual style)
+2. **All subsequent keyframes**: MUST use `--reference` flag with previous keyframe(s)
+3. **End keyframe**: ALWAYS reference the start keyframe of the same scene
+4. **Next scene's start keyframe**: ALWAYS reference the previous scene's end keyframe (or start if no end)
+
+**Reference Chain Example:**
+```
+Scene 1 start → (reference for) → Scene 1 end
+Scene 1 end   → (reference for) → Scene 2 start
+Scene 2 start → (reference for) → Scene 2 end
+... and so on
+```
+
 ### Step 3.1: Set Up Scene Directory
 
 ```bash
@@ -201,21 +218,46 @@ mkdir -p {output_dir}/scene-02
 
 ### Step 3.2: Generate Keyframes Per Scene
 
+**Scene 1 - First keyframe (no reference needed):**
 ```bash
 export GOOGLE_API_KEY="your-key-here"
 
-# Generate start keyframe
+# Scene 1: Start keyframe - establishes visual style
 python {baseDir}/scripts/gemini_image.py \
   --prompt "[Detailed prompt from scene-breakdown.md]" \
   --style-ref {output_dir}/style.json \
   --output {output_dir}/scene-01/keyframe-start.png
+```
 
-# Generate end keyframe (if using dual-frame mode)
+**Scene 1 - End keyframe (MUST reference start):**
+```bash
+# Scene 1: End keyframe - MUST reference start for consistency
 python {baseDir}/scripts/gemini_image.py \
-  --prompt "[Detailed prompt from scene-breakdown.md]" \
+  --prompt "[Detailed prompt - same characters in new pose/state]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-start.png \
   --output {output_dir}/scene-01/keyframe-end.png
+```
+
+**Scene 2+ - Start keyframe (MUST reference previous scene):**
+```bash
+# Scene 2: Start keyframe - MUST reference Scene 1's end keyframe
+python {baseDir}/scripts/gemini_image.py \
+  --prompt "[Detailed prompt for scene 2 start]" \
+  --style-ref {output_dir}/style.json \
+  --reference {output_dir}/scene-01/keyframe-end.png \
+  --output {output_dir}/scene-02/keyframe-start.png
+```
+
+**Multiple references for complex consistency:**
+```bash
+# You can pass multiple --reference flags for better consistency
+python {baseDir}/scripts/gemini_image.py \
+  --prompt "[Detailed prompt]" \
+  --style-ref {output_dir}/style.json \
+  --reference {output_dir}/scene-01/keyframe-start.png \
+  --reference {output_dir}/scene-01/keyframe-end.png \
+  --output {output_dir}/scene-02/keyframe-start.png
 ```
 
 ### Step 3.3: Keyframe Quality Checklist
@@ -224,8 +266,11 @@ Before proceeding to video, verify EACH keyframe:
 - [ ] Subject appears correctly (no distortion)
 - [ ] Style matches Production Philosophy
 - [ ] Composition allows for intended motion
-- [ ] Consistent with other keyframes in the project
+- [ ] **Characters are consistent with reference keyframes**
+- [ ] **Background/environment is consistent with reference keyframes**
 - [ ] Lighting direction is consistent
+
+**If consistency check fails**: Regenerate the keyframe with the same reference images. Do NOT proceed with inconsistent keyframes.
 
 ### Step 3.4: CHECKPOINT - Show User Each Keyframe
 
