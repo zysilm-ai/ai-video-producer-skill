@@ -33,7 +33,7 @@ def generate_image(
     style_ref: str | None = None,
     reference_images: list[str] | None = None,
     aspect_ratio: str = "16:9",
-    model: str = "gemini-2.0-flash-exp",
+    model: str = "gemini-3-pro-image-preview",
 ) -> str:
     """
     Generate an image using Gemini API.
@@ -149,7 +149,7 @@ def main():
     )
     parser.add_argument(
         "--model", "-m",
-        default="gemini-2.0-flash-exp",
+        default="gemini-3-pro-image-preview",
         help="Gemini model to use"
     )
 

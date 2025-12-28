@@ -36,7 +36,7 @@ def generate_video(
     duration: int = 8,
     resolution: str = "720p",
     generate_audio: bool = True,
-    model: str = "veo-2.0-generate-001",
+    model: str = "veo-3.1-generate-preview",
     poll_interval: int = 10,
     max_wait: int = 600,
 ) -> str:
@@ -211,7 +211,7 @@ def main():
     )
     parser.add_argument(
         "--model", "-m",
-        default="veo-2.0-generate-001",
+        default="veo-3.1-generate-preview",
         help="Veo model to use"
     )
     parser.add_argument(
