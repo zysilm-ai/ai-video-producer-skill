@@ -81,7 +81,24 @@ python scripts/gemini_image.py --prompt "A sunset over mountains" --output sunse
 python scripts/veo_video.py --prompt "Camera slowly pans across mountain range at sunset" --output sunset.mp4
 ```
 
-## Quick Start
+## Using with Claude Code
+
+When using this skill with Claude Code, simply describe what video you want to create. Claude will:
+
+1. Help you develop a Production Philosophy
+2. Guide you through scene planning
+3. Generate keyframes and videos
+4. Iterate based on your feedback
+
+Example conversation:
+```
+You: I want to create a 30-second product demo for a smartwatch
+
+Claude: I'll help you create a product demo video. Let's start by
+establishing a Production Philosophy...
+```
+
+## Manual Workflow
 
 ### Step 1: Create Production Philosophy
 
@@ -290,23 +307,6 @@ python scripts/veo_video.py --prompt "..." --output out.mp4 --max-wait 900
 Wait 1-5 minutes and retry. Check quotas in Google Cloud Console.
 
 See `references/troubleshooting.md` for more solutions.
-
-## Using with Claude Code
-
-When using this skill with Claude Code, simply describe what video you want to create. Claude will:
-
-1. Help you develop a Production Philosophy
-2. Guide you through scene planning
-3. Generate keyframes and videos
-4. Iterate based on your feedback
-
-Example conversation:
-```
-You: I want to create a 30-second product demo for a smartwatch
-
-Claude: I'll help you create a product demo video. Let's start by
-establishing a Production Philosophy...
-```
 
 ## Contributing
 
