@@ -26,6 +26,24 @@ Create professional AI-generated videos through a structured, iterative workflow
 5. **ALWAYS ask user for approval** before proceeding to the next phase
 6. **NEVER generate video without scene breakdown** - plan first, execute second
 
+## Standard Checkpoint Format (ALL PHASES)
+
+**Every checkpoint uses the same pattern:**
+
+1. Show the output to user (file path or display content)
+2. Ask for approval using AskUserQuestion:
+   - **"Approve"** - Proceed to next step
+   - User can select **"Other"** to specify what needs to be changed
+
+3. **If user does not approve:**
+   - User specifies what to change
+   - Make the requested adjustments
+   - Show updated result
+   - Ask for approval again
+   - **Repeat until approved**
+
+4. **Do NOT proceed to next phase until current checkpoint is approved**
+
 ## Workflow Phases (MUST COMPLETE IN ORDER)
 
 | Phase | Required Outputs | Checkpoint |
@@ -103,8 +121,12 @@ Create this file for programmatic use with generation scripts:
 
 ### Step 1.3: CHECKPOINT - Get User Approval
 
-**STOP and ask the user:**
-> "I've created the production philosophy. Please review `philosophy.md` and `style.json`. Should I proceed to scene breakdown, or would you like any changes?"
+1. Inform user that `philosophy.md` and `style.json` have been created
+2. Use AskUserQuestion:
+   - **"Approve"** - Proceed to scene breakdown
+   - User selects **"Other"** to specify changes
+
+If user requests changes → make adjustments → ask again → repeat until approved
 
 ---
 
@@ -182,8 +204,12 @@ Before creating scenes, determine:
 
 ### Step 2.3: CHECKPOINT - Get User Approval
 
-**STOP and ask the user:**
-> "I've created the scene breakdown with [N] scenes. Please review `scene-breakdown.md`. Should I proceed to generate keyframes, or would you like to adjust the scenes?"
+1. Inform user that `scene-breakdown.md` has been created with [N] scenes
+2. Use AskUserQuestion:
+   - **"Approve"** - Proceed to keyframe generation
+   - User selects **"Other"** to specify changes
+
+If user requests changes → make adjustments → ask again → repeat until approved
 
 ---
 
@@ -266,56 +292,31 @@ Before proceeding to video, verify EACH keyframe:
 - [ ] Subject appears correctly (no distortion)
 - [ ] Style matches Production Philosophy
 - [ ] Composition allows for intended motion
-- [ ] **Characters are consistent with reference keyframes**
-- [ ] **Background/environment is consistent with reference keyframes**
+- [ ] Characters are consistent with reference keyframes
+- [ ] Background/environment is consistent with reference keyframes
 - [ ] Lighting direction is consistent
-- [ ] **CRITICAL: Character POSITIONS are correct (left/right placement)**
 
 **If consistency check fails**: Regenerate the keyframe with the same reference images. Do NOT proceed with inconsistent keyframes.
 
 ### Step 3.4: MANDATORY CHECKPOINT - Human Review After EACH Keyframe
 
-**IMPORTANT: Spatial positioning (left/right) is a known limitation of image generation models.**
-The model may swap character positions even with reference images. Human review is REQUIRED.
+**After generating EACH keyframe, you MUST:**
 
-**After generating EACH keyframe (not just each scene), you MUST:**
+1. **Show the keyframe to the user** (display the image or provide file path)
+2. **Ask user for approval using AskUserQuestion with simple options:**
+   - "Approve" - Keyframe looks good, proceed
+   - (User can select "Other" to specify what needs to be fixed)
 
-1. **Show the keyframe to the user** (provide file path)
-2. **Ask user to verify these critical points:**
-   - Are character positions correct? (e.g., "Character A on LEFT, Character B on RIGHT")
-   - Does it match the previous keyframe's spatial layout?
-   - Are characters/background consistent with reference?
-
-3. **Use AskUserQuestion with these options:**
-   - "Approve - positions and consistency look good"
-   - "Regenerate - positions are swapped/incorrect"
-   - "Regenerate - character/style inconsistency"
-   - "Adjust prompt - need different composition"
-
-**Example checkpoint message:**
+**Example checkpoint:**
 > "Generated keyframe: `scene-02/keyframe-start.png`
 >
-> **Please verify spatial positions:**
-> - Expected: Athena (purple hair) on LEFT, Yuri (karate gi) on RIGHT
-> - Check: Does this match the previous keyframe's layout?
->
-> If positions are swapped or incorrect, I will regenerate with the same reference."
+> Please review. Approve to proceed, or describe what needs to be fixed."
 
-**Regeneration loop:**
-- If user requests regeneration, regenerate with SAME prompt and reference
+**If user does not approve:**
+- User will specify what needs to be fixed
+- Regenerate with adjusted prompt based on user feedback
 - Repeat checkpoint until user approves
 - Do NOT proceed to next keyframe or video until current keyframe is approved
-
-### Step 3.5: Position Verification Between Scenes
-
-**Before generating Scene N+1 keyframes:**
-1. Review the approved Scene N end keyframe
-2. Note exact character positions (left/right)
-3. Include explicit position instructions in Scene N+1 prompts:
-   ```
-   "Continuing from previous frame: [Character A] remains on the LEFT side,
-   [Character B] remains on the RIGHT side. Maintain exact same positioning."
-   ```
 
 ---
 
