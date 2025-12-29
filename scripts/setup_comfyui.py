@@ -22,7 +22,7 @@ from pathlib import Path
 
 # Configuration
 COMFYUI_REPO = "https://github.com/comfyanonymous/ComfyUI.git"
-COMFYUI_DIR = Path.home() / "ComfyUI"
+COMFYUI_DIR = Path("D:/comfyui")
 
 CUSTOM_NODES = {
     "ComfyUI-GGUF": "https://github.com/city96/ComfyUI-GGUF.git",
@@ -93,11 +93,11 @@ def print_status(message: str, status: str = "info"):
         "progress": "\033[96m",  # Cyan
     }
     icons = {
-        "info": "ℹ️",
-        "success": "✅",
-        "warning": "⚠️",
-        "error": "❌",
-        "progress": "⏳",
+        "info": "[i]",
+        "success": "[+]",
+        "warning": "[!]",
+        "error": "[x]",
+        "progress": "[*]",
     }
     reset = "\033[0m"
     color = colors.get(status, "")

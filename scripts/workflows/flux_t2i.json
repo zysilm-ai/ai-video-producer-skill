@@ -1,6 +1,6 @@
 {
   "1": {
-    "class_type": "UNETLoaderGGUF",
+    "class_type": "UnetLoaderGGUF",
     "inputs": {
       "unet_name": "flux1-schnell-Q4_K_S.gguf"
     }

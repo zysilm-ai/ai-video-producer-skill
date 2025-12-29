@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlencode
 
 try:
@@ -170,7 +170,7 @@ class ComfyUIClient:
         prompt_id: str,
         timeout: int = 600,
         poll_interval: float = 2.0,
-        on_progress: callable | None = None,
+        on_progress: Callable | None = None,
     ) -> dict:
         """
         Wait for a prompt to complete execution.
@@ -259,7 +259,7 @@ class ComfyUIClient:
         self,
         workflow: dict,
         timeout: int = 600,
-        on_progress: callable | None = None,
+        on_progress: Callable | None = None,
     ) -> dict:
         """
         Execute a workflow and wait for completion.

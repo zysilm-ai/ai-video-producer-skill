@@ -77,13 +77,13 @@ def ensure_output_dir(output_path: str) -> Path:
 def print_status(message: str, status: str = "info") -> None:
     """Print formatted status message."""
     icons = {
-        "info": "ℹ️",
-        "success": "✅",
-        "error": "❌",
-        "warning": "⚠️",
-        "progress": "⏳",
+        "info": "[i]",
+        "success": "[+]",
+        "error": "[x]",
+        "warning": "[!]",
+        "progress": "[*]",
     }
-    icon = icons.get(status, "•")
+    icon = icons.get(status, "-")
     print(f"{icon} {message}")
 
 
