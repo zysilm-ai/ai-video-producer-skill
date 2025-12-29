@@ -1,0 +1,96 @@
+{
+  "_comment": "WAN 2.2 Image-to-Video workflow using GGUF models",
+  "1": {
+    "class_type": "UNETLoaderGGUF",
+    "_meta": {"title": "High Noise Model"},
+    "inputs": {
+      "unet_name": "wan2.2_i2v_high_noise_14B_Q4_K_M.gguf"
+    }
+  },
+  "2": {
+    "class_type": "UNETLoaderGGUF",
+    "_meta": {"title": "Low Noise Model"},
+    "inputs": {
+      "unet_name": "wan2.2_i2v_low_noise_14B_Q4_K_M.gguf"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "_meta": {"title": "Text Encoder"},
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan"
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "_meta": {"title": "VAE"},
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "Positive Prompt"},
+    "inputs": {
+      "text": "{{PROMPT}}",
+      "clip": ["3", 0]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "Negative Prompt"},
+    "inputs": {
+      "text": "blurry, low quality, distorted, deformed, static, poorly drawn, disfigured, ugly, worst quality",
+      "clip": ["3", 0]
+    }
+  },
+  "7": {
+    "class_type": "LoadImage",
+    "_meta": {"title": "Start Frame"},
+    "inputs": {
+      "image": "{{START_FRAME}}",
+      "upload": "image"
+    }
+  },
+  "8": {
+    "class_type": "GetImageSize",
+    "_meta": {"title": "Get Size"},
+    "inputs": {
+      "image": ["7", 0]
+    }
+  },
+  "9": {
+    "class_type": "WanImageToVideo",
+    "_meta": {"title": "WAN I2V"},
+    "inputs": {
+      "width": ["8", 0],
+      "height": ["8", 1],
+      "num_frames": 81,
+      "steps": 20,
+      "cfg": 5.0,
+      "seed": 0,
+      "scheduler": "unipc",
+      "denoise_strength": 1.0,
+      "model_high": ["1", 0],
+      "model_low": ["2", 0],
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "vae": ["4", 0],
+      "image": ["7", 0]
+    }
+  },
+  "10": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": {"title": "Save Video"},
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "wan_i2v",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true,
+      "images": ["9", 0]
+    }
+  }
+}

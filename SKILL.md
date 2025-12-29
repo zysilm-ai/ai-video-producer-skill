@@ -1,19 +1,76 @@
 ---
 name: ai-video-producer
 description: >
-  Complete AI video production workflow using Google Gemini and Veo APIs.
+  Complete AI video production workflow using WAN 2.2 and Flux models via ComfyUI.
   Creates any video type: promotional, educational, narrative, social media,
   animations, game trailers, music videos, product demos, and more. Use when
   users want to create videos with AI, need help with video storyboarding,
   keyframe generation, or video prompt writing. Follows a philosophy-first
   approach: establish visual style and production philosophy, then execute
-  scene by scene with user feedback at each stage.
+  scene by scene with user feedback at each stage. Runs locally on RTX 3080+.
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, TodoWrite
 ---
 
 # AI Video Producer
 
-Create professional AI-generated videos through a structured, iterative workflow.
+Create professional AI-generated videos through a structured, iterative workflow using local models.
+
+## Prerequisites & Auto-Setup
+
+**This skill requires ComfyUI with WAN 2.2 models. The setup script handles everything automatically.**
+
+### First-Time Setup (Automatic)
+
+If ComfyUI is not detected, run the auto-setup script:
+
+```bash
+# Full automatic setup (~25GB download)
+python {baseDir}/scripts/setup_comfyui.py
+
+# Check setup status
+python {baseDir}/scripts/setup_comfyui.py --check
+
+# Start ComfyUI server
+python {baseDir}/scripts/setup_comfyui.py --start
+```
+
+The setup script will:
+1. Clone and configure ComfyUI
+2. Install required custom nodes (ComfyUI-GGUF, WanVideoWrapper, VideoHelperSuite)
+3. Download WAN 2.2 GGUF models (Q4_K_M for 10GB VRAM)
+4. Download Flux model for image generation
+5. Install all Python dependencies
+
+### Before Each Session
+
+**Ensure ComfyUI is running before generating videos:**
+
+```bash
+# Start ComfyUI (required before video generation)
+python {baseDir}/scripts/setup_comfyui.py --start
+```
+
+Or manually:
+```bash
+cd ~/ComfyUI && python main.py --listen 0.0.0.0 --port 8188
+```
+
+### Verify Setup
+
+```bash
+python {baseDir}/scripts/comfyui_client.py
+```
+
+### System Requirements
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| GPU VRAM | 10GB | 12GB+ |
+| RAM | 16GB | 32GB |
+| Storage | 30GB free | 50GB+ |
+| OS | Windows/Linux/macOS | Ubuntu 22.04+ |
+
+**See `SETUP.md` for detailed manual installation instructions.**
 
 ## MANDATORY WORKFLOW REQUIREMENTS
 
@@ -22,7 +79,7 @@ Create professional AI-generated videos through a structured, iterative workflow
 1. **ALWAYS use TodoWrite** at the start to create a task list for the entire workflow
 2. **NEVER skip phases** - complete each phase in order before proceeding
 3. **ALWAYS create required files** - philosophy.md, style.json, and scene-breakdown.md are REQUIRED
-4. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 8 seconds
+4. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 5 seconds
 5. **ALWAYS ask user for approval** before proceeding to the next phase
 6. **NEVER generate video without scene breakdown** - plan first, execute second
 
@@ -138,7 +195,7 @@ If user requests changes → make adjustments → ask again → repeat until app
 
 Before creating scenes, determine:
 - Total video duration needed
-- Number of scenes required (minimum 2 for videos > 8 seconds)
+- Number of scenes required (minimum 2 for videos > 5 seconds)
 - Key story beats or content moments
 - Transitions between scenes
 
@@ -158,7 +215,7 @@ Before creating scenes, determine:
 
 ## Scene 1: [Title]
 
-**Duration**: [X seconds]
+**Duration**: [X seconds] (max 5 seconds per scene)
 **Purpose**: [What this scene communicates]
 
 **Keyframes Required**:
@@ -188,19 +245,21 @@ Before creating scenes, determine:
 
 | Scene | Mode | Keyframes | Notes |
 |-------|------|-----------|-------|
-| 1 | [single/dual/text-only] | [1-2] | [any special notes] |
-| 2 | [single/dual/text-only] | [1-2] | [any special notes] |
+| 1 | [single/dual] | [1-2] | [any special notes] |
+| 2 | [single/dual] | [1-2] | [any special notes] |
 ```
 
 ### Scene Count Guidelines
 
+**WAN generates 5-second clips (81 frames at 16fps)**
+
 | Total Video Length | Minimum Scenes | Recommended Scenes |
 |--------------------|----------------|-------------------|
-| 1-8 seconds | 1 | 1-2 |
-| 9-16 seconds | 2 | 2-3 |
-| 17-24 seconds | 3 | 3-4 |
-| 25-40 seconds | 4 | 4-5 |
-| 40+ seconds | 5+ | Break into logical story beats |
+| 1-5 seconds | 1 | 1 |
+| 6-10 seconds | 2 | 2 |
+| 11-15 seconds | 3 | 3 |
+| 16-20 seconds | 4 | 4 |
+| 20+ seconds | 5+ | Break into 5s beats |
 
 ### Step 2.3: CHECKPOINT - Get User Approval
 
@@ -246,10 +305,8 @@ mkdir -p {output_dir}/scene-02
 
 **Scene 1 - First keyframe (no reference needed):**
 ```bash
-export GOOGLE_API_KEY="your-key-here"
-
 # Scene 1: Start keyframe - establishes visual style
-python {baseDir}/scripts/gemini_image.py \
+python {baseDir}/scripts/wan_image.py \
   --prompt "[Detailed prompt from scene-breakdown.md]" \
   --style-ref {output_dir}/style.json \
   --output {output_dir}/scene-01/keyframe-start.png
@@ -258,7 +315,7 @@ python {baseDir}/scripts/gemini_image.py \
 **Scene 1 - End keyframe (MUST reference start):**
 ```bash
 # Scene 1: End keyframe - MUST reference start for consistency
-python {baseDir}/scripts/gemini_image.py \
+python {baseDir}/scripts/wan_image.py \
   --prompt "[Detailed prompt - same characters in new pose/state]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-start.png \
@@ -268,7 +325,7 @@ python {baseDir}/scripts/gemini_image.py \
 **Scene 2+ - Start keyframe (MUST reference previous scene):**
 ```bash
 # Scene 2: Start keyframe - MUST reference Scene 1's end keyframe
-python {baseDir}/scripts/gemini_image.py \
+python {baseDir}/scripts/wan_image.py \
   --prompt "[Detailed prompt for scene 2 start]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-end.png \
@@ -278,7 +335,7 @@ python {baseDir}/scripts/gemini_image.py \
 **Multiple references for complex consistency:**
 ```bash
 # You can pass multiple --reference flags for better consistency
-python {baseDir}/scripts/gemini_image.py \
+python {baseDir}/scripts/wan_image.py \
   --prompt "[Detailed prompt]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-start.png \
@@ -326,24 +383,22 @@ Before proceeding to video, verify EACH keyframe:
 
 ### Step 4.1: Generate Video Per Scene
 
-**Single-frame mode:**
+**Single-frame mode (Image-to-Video):**
 ```bash
-python {baseDir}/scripts/veo_video.py \
+python {baseDir}/scripts/wan_video.py \
   --prompt "[Motion description from scene-breakdown.md]" \
   --start-frame {output_dir}/scene-01/keyframe-start.png \
   --style-ref {output_dir}/style.json \
-  --duration [duration from scene-breakdown] \
   --output {output_dir}/scene-01/video.mp4
 ```
 
-**Dual-frame mode:**
+**Dual-frame mode (First-Last-Frame):**
 ```bash
-python {baseDir}/scripts/veo_video.py \
+python {baseDir}/scripts/wan_video.py \
   --prompt "[Motion description from scene-breakdown.md]" \
   --start-frame {output_dir}/scene-01/keyframe-start.png \
   --end-frame {output_dir}/scene-01/keyframe-end.png \
   --style-ref {output_dir}/style.json \
-  --duration [duration from scene-breakdown] \
   --output {output_dir}/scene-01/video.mp4
 ```
 
@@ -351,7 +406,7 @@ python {baseDir}/scripts/veo_video.py \
 
 **After each video generation, inform the user:**
 > "Generated video for Scene [N]: `scene-XX/video.mp4`
-> Duration: [X seconds]
+> Duration: ~5 seconds (81 frames at 16fps)
 >
 > Please review. Any issues to address before proceeding to the next scene?"
 
@@ -419,17 +474,49 @@ If user requests changes:
 At the START of the workflow, create this todo list:
 
 ```
-1. Create philosophy.md
-2. Create style.json
-3. Get user approval on production philosophy
-4. Create scene-breakdown.md
-5. Get user approval on scene breakdown
-6. Generate Scene 1 keyframes
-7. Get user approval on Scene 1 keyframes
-8. Generate Scene 1 video
-9. [Repeat 6-8 for each scene]
-10. Provide final summary to user
+1. Check ComfyUI setup (run setup if needed)
+2. Start ComfyUI server if not running
+3. Create philosophy.md
+4. Create style.json
+5. Get user approval on production philosophy
+6. Create scene-breakdown.md
+7. Get user approval on scene breakdown
+8. Generate Scene 1 keyframes
+9. Get user approval on Scene 1 keyframes
+10. Generate Scene 1 video
+11. [Repeat 8-10 for each scene]
+12. Provide final summary to user
 ```
+
+### Auto-Setup Check (Step 1)
+
+Before starting video generation, check if ComfyUI is set up:
+
+```bash
+# Check setup status
+python {baseDir}/scripts/setup_comfyui.py --check
+```
+
+If setup is incomplete, run:
+```bash
+# Full automatic setup
+python {baseDir}/scripts/setup_comfyui.py
+```
+
+### Start Server (Step 2)
+
+```bash
+# Verify ComfyUI is accessible
+python {baseDir}/scripts/comfyui_client.py
+```
+
+If not running, start it:
+```bash
+python {baseDir}/scripts/setup_comfyui.py --start
+```
+
+**Note:** The `--start` command runs in foreground. For background operation,
+the user should start ComfyUI in a separate terminal.
 
 ---
 
@@ -437,9 +524,26 @@ At the START of the workflow, create this todo list:
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `gemini_image.py` | Generate keyframes | `--prompt`, `--output`, `--style-ref`, `--reference` |
-| `veo_video.py` | Generate videos | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
-| `status_checker.py` | Monitor jobs | `list`, `check [name]` |
+| `wan_image.py` | Generate keyframes (Flux) | `--prompt`, `--output`, `--style-ref`, `--reference` |
+| `wan_video.py` | Generate videos (WAN 2.2) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
+| `comfyui_client.py` | Test ComfyUI connection | (run directly to test) |
 
+### Video Generation Modes
+
+| Mode | Inputs | Use Case |
+|------|--------|----------|
+| I2V (Image-to-Video) | `--start-frame` | Continuous motion from single frame |
+| FLF2V (First-Last-Frame) | `--start-frame` + `--end-frame` | Precise control over motion |
+
+### Technical Specs
+
+| Parameter | Value |
+|-----------|-------|
+| Video Duration | ~5 seconds (81 frames) |
+| Frame Rate | 16 fps |
+| Resolution | Up to 720p |
+| VRAM Required | 10GB (Q4_K_M quantization) |
+
+See `SETUP.md` for installation instructions.
 See `references/prompt-engineering.md` for detailed prompt writing guidance.
 See `references/troubleshooting.md` for common issues and solutions.
