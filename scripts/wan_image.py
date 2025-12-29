@@ -2,6 +2,7 @@
 """
 Generate images using Flux via ComfyUI.
 Used for creating keyframes in the AI video production workflow.
+Supports Redux for frame consistency when reference images are provided.
 """
 
 import argparse
@@ -18,9 +19,10 @@ from utils import (
 )
 
 
-# Default workflow path
+# Default workflow paths
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
 DEFAULT_WORKFLOW = WORKFLOW_DIR / "flux_t2i.json"
+REDUX_WORKFLOW = WORKFLOW_DIR / "flux_redux.json"
 
 
 def generate_image(
@@ -33,20 +35,23 @@ def generate_image(
     seed: int = 0,
     steps: int = 4,
     workflow_path: str | None = None,
+    redux_strength: float = 0.75,
 ) -> str:
     """
     Generate an image using Flux via ComfyUI.
+    Uses Redux workflow for consistency when reference images are provided.
 
     Args:
         prompt: Text prompt describing the image
         output_path: Path to save the generated image
         style_ref: Optional path to style configuration JSON
-        reference_images: Optional list of reference image paths (for prompt enhancement)
+        reference_images: Optional list of reference image paths (uses Redux for consistency)
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
         steps: Number of sampling steps
         workflow_path: Optional custom workflow path
+        redux_strength: Strength of Redux style conditioning (0.0-1.0)
 
     Returns:
         Path to saved image
@@ -71,16 +76,23 @@ def generate_image(
     # Build enhanced prompt
     enhanced_prompt = build_enhanced_prompt(prompt, style_config)
 
-    # Add reference image descriptions to prompt if provided
-    if reference_images:
-        ref_note = "Maintain visual consistency with previous frames. "
-        enhanced_prompt = ref_note + enhanced_prompt
-        print_status(f"Reference images noted: {len(reference_images)} images")
+    # Determine workflow: use Redux if reference images provided
+    use_redux = reference_images and len(reference_images) > 0 and REDUX_WORKFLOW.exists()
+
+    if use_redux:
+        print_status(f"Using Redux workflow for frame consistency (strength: {redux_strength})")
+        wf_path = workflow_path or str(REDUX_WORKFLOW)
+    else:
+        wf_path = workflow_path or str(DEFAULT_WORKFLOW)
+        if reference_images:
+            # Fallback: add reference note to prompt if Redux not available
+            ref_note = "Maintain visual consistency with previous frames. "
+            enhanced_prompt = ref_note + enhanced_prompt
+            print_status(f"Reference images noted (Redux not available): {len(reference_images)} images", "warning")
 
     print_status(f"Generating image with prompt: {enhanced_prompt[:100]}...")
 
     # Load workflow
-    wf_path = workflow_path or str(DEFAULT_WORKFLOW)
     try:
         workflow = load_workflow(wf_path)
     except FileNotFoundError:
@@ -88,24 +100,55 @@ def generate_image(
         print_status("Please ensure Flux workflow is set up correctly.", "error")
         sys.exit(1)
 
+    # Upload reference image if using Redux
+    uploaded_ref_name = None
+    if use_redux and reference_images:
+        ref_image_path = reference_images[0]  # Use first reference image
+        print_status(f"Uploading reference image: {ref_image_path}", "progress")
+        try:
+            upload_result = client.upload_image(ref_image_path)
+            # Handle both dict response and string response
+            if isinstance(upload_result, dict):
+                uploaded_ref_name = upload_result.get('name', upload_result)
+            else:
+                uploaded_ref_name = upload_result
+            print_status(f"Reference uploaded as: {uploaded_ref_name}")
+        except Exception as e:
+            print_status(f"Failed to upload reference image: {e}", "error")
+            print_status("Falling back to standard workflow", "warning")
+            use_redux = False
+            workflow = load_workflow(str(DEFAULT_WORKFLOW))
+
     # Update workflow parameters
-    # Find and update prompt node
     for node_id, node in workflow.items():
-        if node.get("class_type") == "CLIPTextEncode":
+        class_type = node.get("class_type")
+
+        # Update prompt node
+        if class_type == "CLIPTextEncode":
             inputs = node.get("inputs", {})
-            if inputs.get("text") == "{{PROMPT}}" or "positive" in node.get("_meta", {}).get("title", "").lower():
+            if inputs.get("text") == "{{PROMPT}}" or "positive" in str(node.get("_meta", {}).get("title", "")).lower():
                 workflow[node_id]["inputs"]["text"] = enhanced_prompt
 
         # Update image size
-        if node.get("class_type") in ["EmptySD3LatentImage", "EmptyLatentImage"]:
+        if class_type in ["EmptySD3LatentImage", "EmptyLatentImage"]:
             workflow[node_id]["inputs"]["width"] = width
             workflow[node_id]["inputs"]["height"] = height
 
-        # Update seed
-        if node.get("class_type") == "KSampler":
+        # Update seed and steps
+        if class_type == "KSampler":
             if seed > 0:
                 workflow[node_id]["inputs"]["seed"] = seed
             workflow[node_id]["inputs"]["steps"] = steps
+
+        # Update Redux-specific nodes
+        if use_redux and uploaded_ref_name:
+            # Update LoadImage node with reference
+            if class_type == "LoadImage":
+                workflow[node_id]["inputs"]["image"] = uploaded_ref_name
+
+            # Update StyleModelApply strength
+            if class_type == "StyleModelApply":
+                workflow[node_id]["inputs"]["strength"] = redux_strength
 
     # Execute workflow
     print_status("Submitting to ComfyUI...", "progress")
@@ -163,7 +206,7 @@ def main():
         "--reference", "-r",
         action="append",
         dest="reference_images",
-        help="Reference image path for prompt context (can be specified multiple times)"
+        help="Reference image path for Redux consistency (can be specified multiple times)"
     )
     parser.add_argument(
         "--width", "-W",
@@ -193,6 +236,12 @@ def main():
         "--workflow",
         help="Custom workflow JSON path"
     )
+    parser.add_argument(
+        "--redux-strength",
+        type=float,
+        default=0.75,
+        help="Redux style strength (0.0-1.0, default: 0.75)"
+    )
 
     args = parser.parse_args()
 
@@ -206,6 +255,7 @@ def main():
         seed=args.seed,
         steps=args.steps,
         workflow_path=args.workflow,
+        redux_strength=args.redux_strength,
     )
 
 

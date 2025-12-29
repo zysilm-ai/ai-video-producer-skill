@@ -132,6 +132,8 @@ def generate_video(
 
     # Update workflow parameters
     for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
         class_type = node.get("class_type", "")
         inputs = node.get("inputs", {})
 
