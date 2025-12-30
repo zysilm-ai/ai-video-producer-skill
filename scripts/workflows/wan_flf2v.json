@@ -1,18 +1,14 @@
 {
   "1": {
     "class_type": "UnetLoaderGGUF",
-    "_meta": {
-      "title": "Load Model (GGUF)"
-    },
+    "_meta": {"title": "Load GGUF Model"},
     "inputs": {
       "unet_name": "wan2.2_i2v_low_noise_14B_Q4_K_M.gguf"
     }
   },
   "2": {
     "class_type": "ModelSamplingSD3",
-    "_meta": {
-      "title": "Model Sampling (Flow Shift)"
-    },
+    "_meta": {"title": "Flow Shift"},
     "inputs": {
       "model": ["1", 0],
       "shift": 8.0
@@ -20,9 +16,7 @@
   },
   "3": {
     "class_type": "CLIPLoader",
-    "_meta": {
-      "title": "Text Encoder"
-    },
+    "_meta": {"title": "Text Encoder"},
     "inputs": {
       "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
       "type": "wan"
@@ -30,18 +24,14 @@
   },
   "4": {
     "class_type": "VAELoader",
-    "_meta": {
-      "title": "VAE"
-    },
+    "_meta": {"title": "VAE"},
     "inputs": {
       "vae_name": "wan_2.1_vae.safetensors"
     }
   },
   "5": {
     "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "Positive Prompt"
-    },
+    "_meta": {"title": "Positive Prompt"},
     "inputs": {
       "text": "{{PROMPT}}",
       "clip": ["3", 0]
@@ -49,9 +39,7 @@
   },
   "6": {
     "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "Negative Prompt"
-    },
+    "_meta": {"title": "Negative Prompt"},
     "inputs": {
       "text": "blurry, low quality, distorted, deformed, static, poorly drawn, disfigured, ugly, worst quality",
       "clip": ["3", 0]
@@ -59,30 +47,24 @@
   },
   "7": {
     "class_type": "LoadImage",
-    "_meta": {
-      "title": "First Frame"
-    },
+    "_meta": {"title": "First Frame"},
     "inputs": {
       "image": "{{START_FRAME}}"
     }
   },
   "8": {
     "class_type": "LoadImage",
-    "_meta": {
-      "title": "Last Frame"
-    },
+    "_meta": {"title": "Last Frame"},
     "inputs": {
       "image": "{{END_FRAME}}"
     }
   },
   "9": {
     "class_type": "ImageScale",
-    "_meta": {
-      "title": "Scale First Frame"
-    },
+    "_meta": {"title": "Scale First Frame"},
     "inputs": {
       "image": ["7", 0],
-      "upscale_method": "lanczos",
+      "upscale_method": "nearest-exact",
       "width": 832,
       "height": 480,
       "crop": "disabled"
@@ -90,12 +72,10 @@
   },
   "10": {
     "class_type": "ImageScale",
-    "_meta": {
-      "title": "Scale Last Frame"
-    },
+    "_meta": {"title": "Scale Last Frame"},
     "inputs": {
       "image": ["8", 0],
-      "upscale_method": "lanczos",
+      "upscale_method": "nearest-exact",
       "width": 832,
       "height": 480,
       "crop": "disabled"
@@ -103,9 +83,7 @@
   },
   "11": {
     "class_type": "WanFirstLastFrameToVideo",
-    "_meta": {
-      "title": "WAN FLF2V Conditioning"
-    },
+    "_meta": {"title": "FLF2V Conditioning"},
     "inputs": {
       "positive": ["5", 0],
       "negative": ["6", 0],
@@ -120,16 +98,14 @@
   },
   "12": {
     "class_type": "KSampler",
-    "_meta": {
-      "title": "Sampler"
-    },
+    "_meta": {"title": "Sampler"},
     "inputs": {
       "model": ["2", 0],
       "positive": ["11", 0],
       "negative": ["11", 1],
       "latent_image": ["11", 2],
       "seed": 0,
-      "steps": 20,
+      "steps": 8,
       "cfg": 5.0,
       "sampler_name": "uni_pc",
       "scheduler": "simple",
@@ -138,9 +114,7 @@
   },
   "13": {
     "class_type": "VAEDecode",
-    "_meta": {
-      "title": "Decode Video"
-    },
+    "_meta": {"title": "Decode Video"},
     "inputs": {
       "samples": ["12", 0],
       "vae": ["4", 0]
@@ -148,9 +122,7 @@
   },
   "14": {
     "class_type": "VHS_VideoCombine",
-    "_meta": {
-      "title": "Save Video"
-    },
+    "_meta": {"title": "Save Video"},
     "inputs": {
       "frame_rate": 16,
       "loop_count": 0,

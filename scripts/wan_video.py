@@ -190,13 +190,13 @@ def generate_video(
     end_frame: str | None = None,
     style_ref: str | None = None,
     length: int = 81,
-    steps: int = 20,
+    steps: int = 8,
     cfg: float = 5.0,
     seed: int = 0,
     width: int = None,
     height: int = None,
     resolution_preset: str = None,
-    lora_strength: float = 1.0,
+    lora_strength: float = 1.25,
     timeout: int = 600,
     workflow_path: str = None,
 ) -> str:
@@ -210,13 +210,13 @@ def generate_video(
         end_frame: Optional path to ending frame image
         style_ref: Optional path to style configuration JSON
         length: Number of frames to generate (default 81 = ~5 seconds at 16fps)
-        steps: Number of sampling steps (default 8 with LightX2V)
-        cfg: Classifier-free guidance scale (default 1.0 with LightX2V)
+        steps: Number of sampling steps (default 8 with LightX2V distillation)
+        cfg: Classifier-free guidance scale (default 5.0, use 1.0 with LightX2V LoRA)
         seed: Random seed (0 for random)
         width: Video width (overrides preset)
         height: Video height (overrides preset)
         resolution_preset: Resolution preset ("low", "medium", "high")
-        lora_strength: LightX2V LoRA strength (default 1.0)
+        lora_strength: LightX2V LoRA strength (default 1.25 for I2V)
         timeout: Maximum time to wait for generation
         workflow_path: Custom workflow file path
 
@@ -431,8 +431,8 @@ def main():
     parser.add_argument(
         "--steps",
         type=int,
-        default=20,
-        help="Number of sampling steps (default: 20, use 8 with LightX2V LoRA)"
+        default=8,
+        help="Number of sampling steps (default: 8 with LightX2V LoRA)"
     )
     parser.add_argument(
         "--cfg",
@@ -465,8 +465,8 @@ def main():
     parser.add_argument(
         "--lora-strength",
         type=float,
-        default=1.0,
-        help="LightX2V LoRA strength (default: 1.0, use 1.25 for stronger effect)"
+        default=1.25,
+        help="LightX2V LoRA strength (default: 1.25 for I2V)"
     )
     parser.add_argument(
         "--workflow",
