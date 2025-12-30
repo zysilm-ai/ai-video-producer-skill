@@ -191,7 +191,7 @@ def generate_video(
     style_ref: str | None = None,
     length: int = 81,
     steps: int = 8,
-    cfg: float = 5.0,
+    cfg: float = 1.0,
     seed: int = 0,
     width: int = None,
     height: int = None,
@@ -211,7 +211,7 @@ def generate_video(
         style_ref: Optional path to style configuration JSON
         length: Number of frames to generate (default 81 = ~5 seconds at 16fps)
         steps: Number of sampling steps (default 8 with LightX2V distillation)
-        cfg: Classifier-free guidance scale (default 5.0, use 1.0 with LightX2V LoRA)
+        cfg: Classifier-free guidance scale (default 1.0 with LightX2V LoRA)
         seed: Random seed (0 for random)
         width: Video width (overrides preset)
         height: Video height (overrides preset)
@@ -437,8 +437,8 @@ def main():
     parser.add_argument(
         "--cfg",
         type=float,
-        default=5.0,
-        help="CFG scale (default: 5.0, use 1.0 with LightX2V LoRA)"
+        default=1.0,
+        help="CFG scale (default: 1.0 with LightX2V LoRA)"
     )
     parser.add_argument(
         "--seed",

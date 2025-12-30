@@ -23,56 +23,56 @@
     }
   },
   "4": {
+    "class_type": "LoraLoader",
+    "_meta": {"title": "LightX2V LoRA"},
+    "inputs": {
+      "model": ["2", 0],
+      "clip": ["3", 0],
+      "lora_name": "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+      "strength_model": 1.25,
+      "strength_clip": 1.0
+    }
+  },
+  "5": {
     "class_type": "VAELoader",
     "_meta": {"title": "VAE"},
     "inputs": {
       "vae_name": "wan_2.1_vae.safetensors"
     }
   },
-  "5": {
+  "6": {
     "class_type": "CLIPTextEncode",
     "_meta": {"title": "Positive Prompt"},
     "inputs": {
       "text": "{{PROMPT}}",
-      "clip": ["3", 0]
+      "clip": ["4", 1]
     }
   },
-  "6": {
+  "7": {
     "class_type": "CLIPTextEncode",
     "_meta": {"title": "Negative Prompt"},
     "inputs": {
       "text": "blurry, low quality, distorted, deformed, static, poorly drawn, disfigured, ugly, worst quality",
-      "clip": ["3", 0]
+      "clip": ["4", 1]
     }
   },
-  "7": {
+  "8": {
     "class_type": "LoadImage",
     "_meta": {"title": "First Frame"},
     "inputs": {
       "image": "{{START_FRAME}}"
     }
   },
-  "8": {
+  "9": {
     "class_type": "LoadImage",
     "_meta": {"title": "Last Frame"},
     "inputs": {
       "image": "{{END_FRAME}}"
     }
   },
-  "9": {
-    "class_type": "ImageScale",
-    "_meta": {"title": "Scale First Frame"},
-    "inputs": {
-      "image": ["7", 0],
-      "upscale_method": "nearest-exact",
-      "width": 832,
-      "height": 480,
-      "crop": "disabled"
-    }
-  },
   "10": {
     "class_type": "ImageScale",
-    "_meta": {"title": "Scale Last Frame"},
+    "_meta": {"title": "Scale First Frame"},
     "inputs": {
       "image": ["8", 0],
       "upscale_method": "nearest-exact",
@@ -82,45 +82,56 @@
     }
   },
   "11": {
+    "class_type": "ImageScale",
+    "_meta": {"title": "Scale Last Frame"},
+    "inputs": {
+      "image": ["9", 0],
+      "upscale_method": "nearest-exact",
+      "width": 832,
+      "height": 480,
+      "crop": "disabled"
+    }
+  },
+  "12": {
     "class_type": "WanFirstLastFrameToVideo",
     "_meta": {"title": "FLF2V Conditioning"},
     "inputs": {
-      "positive": ["5", 0],
-      "negative": ["6", 0],
-      "vae": ["4", 0],
-      "start_image": ["9", 0],
-      "end_image": ["10", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "vae": ["5", 0],
+      "start_image": ["10", 0],
+      "end_image": ["11", 0],
       "width": 832,
       "height": 480,
       "length": 81,
       "batch_size": 1
     }
   },
-  "12": {
+  "13": {
     "class_type": "KSampler",
     "_meta": {"title": "Sampler"},
     "inputs": {
-      "model": ["2", 0],
-      "positive": ["11", 0],
-      "negative": ["11", 1],
-      "latent_image": ["11", 2],
+      "model": ["4", 0],
+      "positive": ["12", 0],
+      "negative": ["12", 1],
+      "latent_image": ["12", 2],
       "seed": 0,
       "steps": 8,
-      "cfg": 5.0,
+      "cfg": 1.0,
       "sampler_name": "uni_pc",
       "scheduler": "simple",
       "denoise": 1.0
     }
   },
-  "13": {
+  "14": {
     "class_type": "VAEDecode",
     "_meta": {"title": "Decode Video"},
     "inputs": {
-      "samples": ["12", 0],
-      "vae": ["4", 0]
+      "samples": ["13", 0],
+      "vae": ["5", 0]
     }
   },
-  "14": {
+  "15": {
     "class_type": "VHS_VideoCombine",
     "_meta": {"title": "Save Video"},
     "inputs": {
@@ -130,7 +141,7 @@
       "format": "video/h264-mp4",
       "pingpong": false,
       "save_output": true,
-      "images": ["13", 0]
+      "images": ["14", 0]
     }
   }
 }
