@@ -37,7 +37,7 @@ The philosophy-first approach ensures visual coherence across all scenes, result
 |-----------|---------|-------------|
 | GPU VRAM | 10GB | 12GB+ |
 | RAM | 16GB | 32GB |
-| Storage | 15GB free | 30GB+ |
+| Storage | 30GB free | 50GB+ |
 | OS | Windows/Linux | Windows 10/11, Ubuntu 22.04+ |
 
 **Required Software:** Python 3.10+, Git, CUDA 12.x
@@ -47,7 +47,7 @@ The philosophy-first approach ensures visual coherence across all scenes, result
 ### With Claude Code (Recommended)
 
 Simply describe what video you want to create. Claude will automatically:
-- Check and run setup if needed (downloads ~15GB of models on first run)
+- Check and run setup if needed (downloads ~27GB of models on first run)
 - Start ComfyUI server
 - Guide you through the production workflow
 - Generate keyframes and videos
@@ -75,7 +75,7 @@ For using the scripts without Claude Code.
 ```bash
 cd gemini-video-producer-skill
 
-# Full automatic setup (~15GB download)
+# Full automatic setup (~27GB download)
 python scripts/setup_comfyui.py
 
 # Check setup status
@@ -87,8 +87,11 @@ This will:
 2. Install custom nodes (ComfyUI-GGUF, VideoHelperSuite, etc.)
 3. Download WAN 2.2 GGUF model (~8.5GB)
 4. Download UMT5-XXL text encoder (~4.9GB)
-5. Download VAE (~0.2GB)
+5. Download WAN VAE (~0.2GB)
 6. Download LightX2V distillation LoRA (~0.7GB)
+7. Download Flux Schnell GGUF model (~6.8GB)
+8. Download Flux text encoders (~5.1GB)
+9. Download Flux VAE (~0.3GB)
 
 See [SETUP.md](SETUP.md) for detailed manual installation instructions.
 
@@ -105,7 +108,7 @@ cd D:/ComfyUI && python main.py --listen 0.0.0.0 --port 8188
 #### 3. Generate Keyframe Image
 
 ```bash
-python scripts/wan_image.py \
+python scripts/flux_image.py \
   --prompt "A warrior stands ready for battle, dramatic lighting" \
   --output outputs/scene-01/keyframe-start.png \
   --width 832 --height 480
@@ -222,12 +225,12 @@ python scripts/wan_video.py \
   [--seed 0]
 ```
 
-### wan_image.py
+### flux_image.py
 
 Generate keyframe images.
 
 ```bash
-python scripts/wan_image.py \
+python scripts/flux_image.py \
   --prompt "Image description" \
   --output path/to/output.png \
   [--style-ref path/to/style.json] \
@@ -256,7 +259,7 @@ gemini-video-producer-skill/
 ├── requirements.txt         # Python dependencies
 ├── scripts/
 │   ├── wan_video.py         # Video generation
-│   ├── wan_image.py         # Image generation
+│   ├── flux_image.py        # Keyframe image generation (Flux)
 │   ├── setup_comfyui.py     # Auto-setup script
 │   ├── comfyui_client.py    # ComfyUI API client
 │   └── workflows/

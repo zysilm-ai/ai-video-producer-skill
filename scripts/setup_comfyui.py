@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Auto-setup script for ComfyUI with WAN 2.2 video generation.
+Auto-setup script for ComfyUI with WAN 2.2 video generation and Flux keyframe generation.
 Downloads and configures everything needed to run the AI video skill.
 
 Usage:
@@ -32,19 +32,22 @@ CUSTOM_NODES = {
 
 # Model URLs and paths (relative to ComfyUI/models/)
 MODELS = {
+    # ===========================================
+    # WAN 2.2 Models (Video Generation)
+    # ===========================================
     # WAN 2.2 GGUF models (Q4_K_M for 10GB VRAM)
     "diffusion_models/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf": {
         "url": "https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF/resolve/main/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf",
         "size_gb": 8.5,
         "required": True,
     },
-    # Text encoder
+    # WAN Text encoder
     "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
         "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
         "size_gb": 4.9,
         "required": True,
     },
-    # VAE
+    # WAN VAE
     "vae/wan_2.1_vae.safetensors": {
         "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
         "size_gb": 0.2,
@@ -54,6 +57,33 @@ MODELS = {
     "loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors": {
         "url": "https://huggingface.co/lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v/resolve/main/loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
         "size_gb": 0.7,
+        "required": True,
+    },
+    # ===========================================
+    # Flux Models (Keyframe/Image Generation)
+    # ===========================================
+    # Flux Schnell GGUF (fast 4-step generation)
+    "unet/flux1-schnell-Q4_K_S.gguf": {
+        "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_K_S.gguf",
+        "size_gb": 6.8,
+        "required": True,
+    },
+    # Flux T5 Text encoder (FP8)
+    "clip/t5xxl_fp8_e4m3fn.safetensors": {
+        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
+        "size_gb": 4.9,
+        "required": True,
+    },
+    # Flux CLIP-L encoder
+    "clip/clip_l.safetensors": {
+        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+        "size_gb": 0.2,
+        "required": True,
+    },
+    # Flux VAE (from mirror - official requires login)
+    "vae/ae.safetensors": {
+        "url": "https://huggingface.co/ffxvs/vae-flux/resolve/main/ae.safetensors",
+        "size_gb": 0.3,
         "required": True,
     },
 }
@@ -309,7 +339,7 @@ def print_setup_status(status: dict):
 
     print("\n" + "="*50)
     if status["ready"]:
-        print_status("Setup complete! Ready to generate videos.", "success")
+        print_status("Setup complete! Ready to generate keyframes and videos.", "success")
     else:
         print_status("Setup incomplete. Run: python setup_comfyui.py", "warning")
     print("="*50 + "\n")
@@ -340,7 +370,7 @@ def start_comfyui(comfyui_dir: Path, port: int = 8188):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Setup ComfyUI for WAN 2.2 video generation"
+        description="Setup ComfyUI for AI video production (Flux keyframes + WAN 2.2 video)"
     )
     parser.add_argument(
         "--check",
@@ -374,7 +404,8 @@ def main():
     comfyui_dir = args.dir
 
     print("\n" + "="*50)
-    print("WAN 2.2 Video Generation Setup")
+    print("AI Video Producer Setup")
+    print("(Flux for keyframes + WAN 2.2 for video)")
     print("="*50 + "\n")
 
     # Check only

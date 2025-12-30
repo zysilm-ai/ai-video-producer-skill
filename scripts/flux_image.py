@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate images using WAN 2.2 via ComfyUI.
+Generate keyframe images using Flux Schnell via ComfyUI.
 Used for creating keyframes in the AI video production workflow.
-WAN can generate single images by setting num_frames=1.
+Flux Schnell provides fast, high-quality image generation in 4 steps.
 """
 
 import argparse
@@ -28,7 +28,7 @@ from utils import (
 
 # Default workflow paths
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
-T2I_WORKFLOW = WORKFLOW_DIR / "wan_t2i.json"
+T2I_WORKFLOW = WORKFLOW_DIR / "flux_t2i.json"  # Flux Schnell for keyframes
 I2I_WORKFLOW = WORKFLOW_DIR / "wan_i2i.json"  # For reference-based generation
 
 # Resolution presets for different VRAM levels
@@ -156,14 +156,14 @@ def generate_image(
     width: int = 832,
     height: int = 480,
     seed: int = 0,
-    steps: int = 20,
-    cfg: float = 5.0,
+    steps: int = 4,
+    cfg: float = 1.0,
     resolution_preset: str = None,
     workflow_path: str | None = None,
     timeout: int = 300,
 ) -> str:
     """
-    Generate an image using WAN 2.2 via ComfyUI (num_frames=1).
+    Generate a keyframe image using Flux Schnell via ComfyUI.
 
     Args:
         prompt: Text prompt describing the image
@@ -173,8 +173,8 @@ def generate_image(
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
-        steps: Number of sampling steps
-        cfg: Classifier-free guidance scale
+        steps: Number of sampling steps (4 for Flux Schnell)
+        cfg: Classifier-free guidance scale (1.0 for Flux Schnell)
         resolution_preset: Resolution preset ("low", "medium", "high")
         workflow_path: Optional custom workflow path
         timeout: Maximum time to wait for generation
@@ -332,7 +332,7 @@ def generate_image(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate images using WAN 2.2 via ComfyUI for video keyframes"
+        description="Generate keyframe images using Flux Schnell via ComfyUI"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -380,14 +380,14 @@ def main():
     parser.add_argument(
         "--steps",
         type=int,
-        default=20,
-        help="Number of sampling steps (default: 20)"
+        default=4,
+        help="Number of sampling steps (default: 4 for Flux Schnell)"
     )
     parser.add_argument(
         "--cfg",
         type=float,
-        default=5.0,
-        help="CFG scale (default: 5.0)"
+        default=1.0,
+        help="CFG scale (default: 1.0 for Flux Schnell)"
     )
     parser.add_argument(
         "--workflow",
