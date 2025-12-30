@@ -1,57 +1,178 @@
 #!/usr/bin/env python3
 """
-Generate images using Flux via ComfyUI.
+Generate images using WAN 2.2 via ComfyUI.
 Used for creating keyframes in the AI video production workflow.
-Supports Redux for frame consistency when reference images are provided.
+WAN can generate single images by setting num_frames=1.
 """
 
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
-from comfyui_client import ComfyUIClient, load_workflow, update_workflow_value
+from comfyui_client import (
+    ComfyUIClient,
+    ComfyUIError,
+    WorkflowValidationError,
+    load_workflow,
+)
 from utils import (
     load_style_config,
     ensure_output_dir,
     print_status,
+    format_duration,
     build_enhanced_prompt,
 )
 
 
 # Default workflow paths
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
-DEFAULT_WORKFLOW = WORKFLOW_DIR / "flux_t2i.json"
-REDUX_WORKFLOW = WORKFLOW_DIR / "flux_redux.json"
+T2I_WORKFLOW = WORKFLOW_DIR / "wan_t2i.json"
+I2I_WORKFLOW = WORKFLOW_DIR / "wan_i2i.json"  # For reference-based generation
+
+# Resolution presets for different VRAM levels
+RESOLUTION_PRESETS = {
+    "low": {"width": 640, "height": 384},      # ~8GB VRAM
+    "medium": {"width": 832, "height": 480},   # ~10GB VRAM
+    "high": {"width": 1280, "height": 720},    # ~16GB+ VRAM
+}
+
+
+def update_workflow_prompts(workflow: dict, prompt: str, negative_prompt: str = None) -> dict:
+    """Update text prompts in workflow."""
+    default_negative = "blurry, low quality, distorted, deformed, poorly drawn, disfigured, ugly, worst quality"
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+
+        class_type = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+        title = node.get("_meta", {}).get("title", "").lower()
+
+        if class_type == "CLIPTextEncode":
+            current_text = inputs.get("text", "")
+
+            # Check if this is the positive prompt
+            if "{{PROMPT}}" in current_text or "positive" in title:
+                workflow[node_id]["inputs"]["text"] = prompt
+            # Check if this is the negative prompt
+            elif "negative" in title:
+                workflow[node_id]["inputs"]["text"] = negative_prompt or default_negative
+
+    return workflow
+
+
+def update_workflow_images(workflow: dict, reference_image: str = None) -> dict:
+    """Update image inputs in workflow for I2I mode."""
+    if not reference_image:
+        return workflow
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+
+        class_type = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+        title = node.get("_meta", {}).get("title", "").lower()
+
+        if class_type == "LoadImage":
+            current_image = str(inputs.get("image", ""))
+            # Update reference/input image
+            if "reference" in title or "input" in title or "{{REFERENCE}}" in current_image:
+                workflow[node_id]["inputs"]["image"] = reference_image
+
+    return workflow
+
+
+def update_workflow_params(
+    workflow: dict,
+    width: int = None,
+    height: int = None,
+    steps: int = None,
+    cfg: float = None,
+    seed: int = None,
+) -> dict:
+    """Update generation parameters in workflow."""
+    # For T2I, we use num_frames=1 to generate a single image
+    # Node classes that accept these parameters
+    generation_classes = [
+        "WanImageToVideo",
+        "WanFirstLastFrameToVideo",
+        "WanVideoSampler",
+        "KSampler",
+        "KSamplerAdvanced",
+    ]
+
+    encode_classes = [
+        "WanVideoImageToVideoEncode",
+        "EmptyLatentImage",
+        "EmptySD3LatentImage",
+    ]
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+
+        class_type = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+
+        # Update generation nodes
+        if class_type in generation_classes:
+            # For image generation, use num_frames=1
+            if "num_frames" in inputs:
+                workflow[node_id]["inputs"]["num_frames"] = 1
+            if steps is not None and "steps" in inputs:
+                workflow[node_id]["inputs"]["steps"] = steps
+            if cfg is not None and "cfg" in inputs:
+                workflow[node_id]["inputs"]["cfg"] = cfg
+            if seed is not None and seed > 0 and "seed" in inputs:
+                workflow[node_id]["inputs"]["seed"] = seed
+
+        # Update latent/encode nodes (for resolution)
+        if class_type in encode_classes:
+            if width is not None and "width" in inputs:
+                workflow[node_id]["inputs"]["width"] = width
+            if height is not None and "height" in inputs:
+                workflow[node_id]["inputs"]["height"] = height
+            # For WAN image generation, use 1 frame
+            if "num_frames" in inputs:
+                workflow[node_id]["inputs"]["num_frames"] = 1
+
+    return workflow
 
 
 def generate_image(
     prompt: str,
     output_path: str,
     style_ref: str | None = None,
-    reference_images: list[str] | None = None,
-    width: int = 1280,
-    height: int = 720,
+    reference_image: str | None = None,
+    width: int = 832,
+    height: int = 480,
     seed: int = 0,
-    steps: int = 4,
+    steps: int = 20,
+    cfg: float = 5.0,
+    resolution_preset: str = None,
     workflow_path: str | None = None,
-    redux_strength: float = 0.75,
+    timeout: int = 300,
 ) -> str:
     """
-    Generate an image using Flux via ComfyUI.
-    Uses Redux workflow for consistency when reference images are provided.
+    Generate an image using WAN 2.2 via ComfyUI (num_frames=1).
 
     Args:
         prompt: Text prompt describing the image
         output_path: Path to save the generated image
         style_ref: Optional path to style configuration JSON
-        reference_images: Optional list of reference image paths (uses Redux for consistency)
+        reference_image: Optional reference image for consistency
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
         steps: Number of sampling steps
+        cfg: Classifier-free guidance scale
+        resolution_preset: Resolution preset ("low", "medium", "high")
         workflow_path: Optional custom workflow path
-        redux_strength: Strength of Redux style conditioning (0.0-1.0)
+        timeout: Maximum time to wait for generation
 
     Returns:
         Path to saved image
@@ -63,6 +184,13 @@ def generate_image(
         print_status("ComfyUI server not available!", "error")
         print_status("Please start ComfyUI: python main.py --listen 0.0.0.0 --port 8188", "error")
         sys.exit(1)
+
+    # Apply resolution preset if specified
+    if resolution_preset and resolution_preset in RESOLUTION_PRESETS:
+        preset = RESOLUTION_PRESETS[resolution_preset]
+        width = preset["width"]
+        height = preset["height"]
+        print_status(f"Using '{resolution_preset}' preset: {width}x{height}")
 
     # Load style configuration if provided
     style_config = None
@@ -76,95 +204,96 @@ def generate_image(
     # Build enhanced prompt
     enhanced_prompt = build_enhanced_prompt(prompt, style_config)
 
-    # Determine workflow: use Redux if reference images provided
-    use_redux = reference_images and len(reference_images) > 0 and REDUX_WORKFLOW.exists()
-
-    if use_redux:
-        print_status(f"Using Redux workflow for frame consistency (strength: {redux_strength})")
-        wf_path = workflow_path or str(REDUX_WORKFLOW)
+    # Determine workflow based on inputs
+    if workflow_path:
+        wf_path = Path(workflow_path)
+        print_status("Using custom workflow")
+    elif reference_image and I2I_WORKFLOW.exists():
+        wf_path = I2I_WORKFLOW
+        print_status("Using I2I workflow with reference image")
+    elif T2I_WORKFLOW.exists():
+        wf_path = T2I_WORKFLOW
+        print_status("Using T2I workflow")
     else:
-        wf_path = workflow_path or str(DEFAULT_WORKFLOW)
-        if reference_images:
-            # Fallback: add reference note to prompt if Redux not available
-            ref_note = "Maintain visual consistency with previous frames. "
-            enhanced_prompt = ref_note + enhanced_prompt
-            print_status(f"Reference images noted (Redux not available): {len(reference_images)} images", "warning")
+        # Fall back to video workflow with num_frames=1
+        from wan_video import I2V_WORKFLOW
+        wf_path = I2V_WORKFLOW
+        print_status("Using I2V workflow with num_frames=1")
+        if not reference_image:
+            print_status("Warning: I2V workflow requires a reference image", "warning")
+            print_status("Please provide --reference or create a T2I workflow", "warning")
+            sys.exit(1)
 
     print_status(f"Generating image with prompt: {enhanced_prompt[:100]}...")
+    print_status(f"Resolution: {width}x{height}, Steps: {steps}, CFG: {cfg}")
 
     # Load workflow
-    try:
-        workflow = load_workflow(wf_path)
-    except FileNotFoundError:
+    if not wf_path.exists():
         print_status(f"Workflow not found: {wf_path}", "error")
-        print_status("Please ensure Flux workflow is set up correctly.", "error")
+        print_status("Please ensure WAN workflows are set up correctly.", "error")
         sys.exit(1)
 
-    # Upload reference image if using Redux
+    try:
+        workflow = load_workflow(str(wf_path))
+    except json.JSONDecodeError as e:
+        print_status(f"Invalid workflow JSON: {e}", "error")
+        sys.exit(1)
+
+    # Upload reference image if provided
     uploaded_ref_name = None
-    if use_redux and reference_images:
-        ref_image_path = reference_images[0]  # Use first reference image
-        print_status(f"Uploading reference image: {ref_image_path}", "progress")
+    if reference_image:
+        if not Path(reference_image).exists():
+            print_status(f"Reference image not found: {reference_image}", "error")
+            sys.exit(1)
+
+        print_status(f"Uploading reference image: {reference_image}", "progress")
         try:
-            upload_result = client.upload_image(ref_image_path)
-            # Handle both dict response and string response
-            if isinstance(upload_result, dict):
-                uploaded_ref_name = upload_result.get('name', upload_result)
-            else:
-                uploaded_ref_name = upload_result
+            upload_result = client.upload_image(reference_image)
+            uploaded_ref_name = upload_result.get('name', str(upload_result))
             print_status(f"Reference uploaded as: {uploaded_ref_name}")
         except Exception as e:
             print_status(f"Failed to upload reference image: {e}", "error")
-            print_status("Falling back to standard workflow", "warning")
-            use_redux = False
-            workflow = load_workflow(str(DEFAULT_WORKFLOW))
+            sys.exit(1)
 
-    # Update workflow parameters
-    for node_id, node in workflow.items():
-        class_type = node.get("class_type")
-
-        # Update prompt node
-        if class_type == "CLIPTextEncode":
-            inputs = node.get("inputs", {})
-            if inputs.get("text") == "{{PROMPT}}" or "positive" in str(node.get("_meta", {}).get("title", "")).lower():
-                workflow[node_id]["inputs"]["text"] = enhanced_prompt
-
-        # Update image size
-        if class_type in ["EmptySD3LatentImage", "EmptyLatentImage"]:
-            workflow[node_id]["inputs"]["width"] = width
-            workflow[node_id]["inputs"]["height"] = height
-
-        # Update seed and steps
-        if class_type == "KSampler":
-            if seed > 0:
-                workflow[node_id]["inputs"]["seed"] = seed
-            workflow[node_id]["inputs"]["steps"] = steps
-
-        # Update Redux-specific nodes
-        if use_redux and uploaded_ref_name:
-            # Update LoadImage node with reference
-            if class_type == "LoadImage":
-                workflow[node_id]["inputs"]["image"] = uploaded_ref_name
-
-            # Update StyleModelApply strength
-            if class_type == "StyleModelApply":
-                workflow[node_id]["inputs"]["strength"] = redux_strength
+    # Update workflow
+    workflow = update_workflow_prompts(workflow, enhanced_prompt)
+    if uploaded_ref_name:
+        workflow = update_workflow_images(workflow, uploaded_ref_name)
+    workflow = update_workflow_params(
+        workflow,
+        width=width,
+        height=height,
+        steps=steps,
+        cfg=cfg,
+        seed=seed,
+    )
 
     # Execute workflow
     print_status("Submitting to ComfyUI...", "progress")
+    start_time = time.time()
 
     def on_progress(msg):
-        print_status(msg, "progress")
+        elapsed = time.time() - start_time
+        print_status(f"{msg} ({format_duration(elapsed)})", "progress")
 
     try:
         result = client.execute_workflow(
             workflow,
-            timeout=300,
+            timeout=timeout,
             on_progress=on_progress,
+            validate=True,
         )
 
         # Get output images
         images = client.get_output_images(result)
+
+        # Also check for video outputs (if workflow outputs as video)
+        if not images:
+            videos = client.get_output_videos(result)
+            if videos:
+                # Extract first frame from video output
+                print_status("Output is video format, saving first frame", "warning")
+                images = videos  # Use same download logic
 
         if not images:
             print_status("No images generated!", "error")
@@ -176,9 +305,21 @@ def generate_image(
         image_info = images[0]
         client.download_output(image_info, str(output))
 
-        print_status(f"Image saved to: {output_path}", "success")
+        total_time = time.time() - start_time
+        print_status(f"Image saved to: {output_path} ({format_duration(total_time)})", "success")
         return str(output)
 
+    except WorkflowValidationError as e:
+        print_status("Workflow validation failed:", "error")
+        print(str(e))
+        sys.exit(1)
+    except ComfyUIError as e:
+        print_status("ComfyUI error:", "error")
+        print(str(e))
+        sys.exit(1)
+    except TimeoutError:
+        print_status(f"Generation timed out after {timeout}s", "error")
+        sys.exit(1)
     except Exception as e:
         print_status(f"Generation failed: {e}", "error")
         sys.exit(1)
@@ -186,7 +327,7 @@ def generate_image(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate images using Flux via ComfyUI for video keyframes"
+        description="Generate images using WAN 2.2 via ComfyUI for video keyframes"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -204,21 +345,26 @@ def main():
     )
     parser.add_argument(
         "--reference", "-r",
-        action="append",
-        dest="reference_images",
-        help="Reference image path for Redux consistency (can be specified multiple times)"
+        dest="reference_image",
+        help="Reference image path for consistency"
     )
     parser.add_argument(
         "--width", "-W",
         type=int,
-        default=1280,
-        help="Image width (default: 1280)"
+        default=832,
+        help="Image width (default: 832)"
     )
     parser.add_argument(
         "--height", "-H",
         type=int,
-        default=720,
-        help="Image height (default: 720)"
+        default=480,
+        help="Image height (default: 480)"
+    )
+    parser.add_argument(
+        "--preset",
+        choices=["low", "medium", "high"],
+        default="medium",
+        help="Resolution preset (default: medium = 832x480)"
     )
     parser.add_argument(
         "--seed",
@@ -229,18 +375,24 @@ def main():
     parser.add_argument(
         "--steps",
         type=int,
-        default=4,
-        help="Number of sampling steps (default: 4 for schnell)"
+        default=20,
+        help="Number of sampling steps (default: 20)"
+    )
+    parser.add_argument(
+        "--cfg",
+        type=float,
+        default=5.0,
+        help="CFG scale (default: 5.0)"
     )
     parser.add_argument(
         "--workflow",
         help="Custom workflow JSON path"
     )
     parser.add_argument(
-        "--redux-strength",
-        type=float,
-        default=0.75,
-        help="Redux style strength (0.0-1.0, default: 0.75)"
+        "--timeout",
+        type=int,
+        default=300,
+        help="Maximum time to wait in seconds (default: 300)"
     )
 
     args = parser.parse_args()
@@ -249,13 +401,15 @@ def main():
         prompt=args.prompt,
         output_path=args.output,
         style_ref=args.style_ref,
-        reference_images=args.reference_images,
+        reference_image=args.reference_image,
         width=args.width,
         height=args.height,
         seed=args.seed,
         steps=args.steps,
+        cfg=args.cfg,
+        resolution_preset=args.preset,
         workflow_path=args.workflow,
-        redux_strength=args.redux_strength,
+        timeout=args.timeout,
     )
 
 

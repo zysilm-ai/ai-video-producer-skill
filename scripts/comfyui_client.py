@@ -24,6 +24,21 @@ except ImportError as e:
 from utils import print_status, format_duration
 
 
+class ComfyUIError(Exception):
+    """Base exception for ComfyUI errors."""
+    pass
+
+
+class WorkflowValidationError(ComfyUIError):
+    """Raised when workflow validation fails."""
+    pass
+
+
+class NodeNotFoundError(ComfyUIError):
+    """Raised when a required node type is not available."""
+    pass
+
+
 class ComfyUIClient:
     """Client for interacting with ComfyUI API."""
 
@@ -43,6 +58,7 @@ class ComfyUIClient:
         self.port = port or int(os.environ.get("COMFYUI_PORT", "8188"))
         self.base_url = f"http://{self.host}:{self.port}"
         self.client_id = str(uuid.uuid4())
+        self._object_info_cache = None
 
     def is_available(self) -> bool:
         """Check if ComfyUI server is running and accessible."""
@@ -57,6 +73,91 @@ class ComfyUIClient:
         response = requests.get(f"{self.base_url}/system_stats", timeout=10)
         response.raise_for_status()
         return response.json()
+
+    def get_object_info(self, force_refresh: bool = False) -> dict:
+        """
+        Get available node types and their input/output specifications.
+
+        Args:
+            force_refresh: If True, bypass cache and fetch fresh data
+
+        Returns:
+            Dict mapping node class names to their specifications
+        """
+        if self._object_info_cache is None or force_refresh:
+            response = requests.get(f"{self.base_url}/object_info", timeout=30)
+            response.raise_for_status()
+            self._object_info_cache = response.json()
+        return self._object_info_cache
+
+    def validate_workflow(self, workflow: dict) -> list[str]:
+        """
+        Validate a workflow against available nodes.
+
+        Args:
+            workflow: ComfyUI workflow dict
+
+        Returns:
+            List of validation errors (empty if valid)
+        """
+        errors = []
+
+        # Basic structure validation
+        if not isinstance(workflow, dict):
+            errors.append("Workflow must be a dictionary")
+            return errors
+
+        if not workflow:
+            errors.append("Workflow is empty")
+            return errors
+
+        # Get available nodes
+        try:
+            object_info = self.get_object_info()
+        except Exception as e:
+            errors.append(f"Could not fetch node info: {e}")
+            return errors
+
+        available_nodes = set(object_info.keys())
+
+        for node_id, node_data in workflow.items():
+            # Skip non-dict entries (like _comment)
+            if not isinstance(node_data, dict):
+                continue
+
+            # Check if node has class_type
+            if "class_type" not in node_data:
+                errors.append(f"Node '{node_id}' missing 'class_type'")
+                continue
+
+            class_type = node_data["class_type"]
+
+            # Check if node type exists
+            if class_type not in available_nodes:
+                # Try to suggest similar nodes
+                similar = [n for n in available_nodes if class_type.lower() in n.lower()]
+                if similar:
+                    errors.append(
+                        f"Node '{node_id}': Unknown class_type '{class_type}'. "
+                        f"Similar nodes: {', '.join(similar[:3])}"
+                    )
+                else:
+                    errors.append(f"Node '{node_id}': Unknown class_type '{class_type}'")
+                continue
+
+            # Validate required inputs
+            node_spec = object_info[class_type]
+            required_inputs = node_spec.get("input", {}).get("required", {})
+            node_inputs = node_data.get("inputs", {})
+
+            for input_name, input_spec in required_inputs.items():
+                if input_name not in node_inputs:
+                    errors.append(
+                        f"Node '{node_id}' ({class_type}): "
+                        f"Missing required input '{input_name}'"
+                    )
+
+        return errors
 
     def upload_image(self, image_path: str, subfolder: str = "") -> dict:
         """
@@ -90,16 +191,24 @@ class ComfyUIClient:
             response.raise_for_status()
             return response.json()
 
-    def queue_prompt(self, workflow: dict) -> str:
+    def queue_prompt(self, workflow: dict, validate: bool = True) -> str:
         """
         Submit a workflow for execution.
 
         Args:
             workflow: ComfyUI workflow dict (API format)
+            validate: If True, validate workflow before submission
 
         Returns:
             prompt_id for tracking the job
         """
+        # Validate workflow first
+        if validate:
+            errors = self.validate_workflow(workflow)
+            if errors:
+                error_msg = "Workflow validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+                raise WorkflowValidationError(error_msg)
+
         payload = {
             "prompt": workflow,
             "client_id": self.client_id,
@@ -110,13 +219,49 @@ class ComfyUIClient:
             json=payload,
             timeout=30,
         )
-        response.raise_for_status()
 
+        # Handle error responses
         result = response.json()
+
         if "error" in result:
-            raise RuntimeError(f"Workflow error: {result['error']}")
+            error_info = result["error"]
+            error_msg = self._format_error(error_info, result.get("node_errors", {}))
+            raise ComfyUIError(f"Workflow submission failed:\n{error_msg}")
+
+        if response.status_code != 200:
+            raise ComfyUIError(f"Unexpected response: {response.status_code} - {response.text}")
 
         return result["prompt_id"]
+
+    def _format_error(self, error: Any, node_errors: dict) -> str:
+        """Format ComfyUI error into readable message."""
+        lines = []
+
+        if isinstance(error, dict):
+            if "message" in error:
+                lines.append(f"Error: {error['message']}")
+            if "details" in error:
+                lines.append(f"Details: {error['details']}")
+        else:
+            lines.append(f"Error: {error}")
+
+        # Add node-specific errors
+        if node_errors:
+            lines.append("\nNode errors:")
+            for node_id, node_error in node_errors.items():
+                if isinstance(node_error, dict):
+                    class_type = node_error.get("class_type", "unknown")
+                    errors = node_error.get("errors", [])
+                    lines.append(f"  Node '{node_id}' ({class_type}):")
+                    for err in errors:
+                        if isinstance(err, dict):
+                            lines.append(f"    - {err.get('message', err)}")
+                        else:
+                            lines.append(f"    - {err}")
+                else:
+                    lines.append(f"  Node '{node_id}': {node_error}")
+
+        return "\n".join(lines)
 
     def get_history(self, prompt_id: str) -> dict:
         """
@@ -206,11 +351,12 @@ class ComfyUIClient:
                         msg_type = data.get("type")
 
                         if msg_type == "executing":
-                            node = data.get("data", {}).get("node")
-                            if node is None:
+                            exec_data = data.get("data", {})
+                            node = exec_data.get("node")
+                            if node is None and exec_data.get("prompt_id") == prompt_id:
                                 # Execution complete
                                 break
-                            if on_progress:
+                            if on_progress and node:
                                 on_progress(f"Executing node: {node}")
 
                         elif msg_type == "progress":
@@ -221,8 +367,9 @@ class ComfyUIClient:
                                 on_progress(f"Progress: {pct}%")
 
                         elif msg_type == "execution_error":
-                            error = data.get("data", {})
-                            raise RuntimeError(f"Execution error: {error}")
+                            error_data = data.get("data", {})
+                            error_msg = self._format_execution_error(error_data)
+                            raise ComfyUIError(f"Execution error:\n{error_msg}")
 
                 except websocket.WebSocketTimeoutException:
                     # Check if already completed via history
@@ -232,7 +379,7 @@ class ComfyUIClient:
 
             ws.close()
 
-        except Exception as e:
+        except (websocket.WebSocketException, OSError) as e:
             # Fallback to polling if WebSocket fails
             print_status(f"WebSocket error, falling back to polling: {e}", "warning")
             while True:
@@ -242,6 +389,12 @@ class ComfyUIClient:
 
                 history = self.get_history(prompt_id)
                 if prompt_id in history:
+                    # Check for execution errors
+                    status = history[prompt_id].get("status", {})
+                    if status.get("status_str") == "error":
+                        messages = status.get("messages", [])
+                        error_msg = "\n".join(str(m) for m in messages)
+                        raise ComfyUIError(f"Execution error:\n{error_msg}")
                     break
 
                 if on_progress:
@@ -251,15 +404,46 @@ class ComfyUIClient:
         # Get final result
         history = self.get_history(prompt_id)
         if prompt_id not in history:
-            raise RuntimeError("Prompt not found in history after completion")
+            raise ComfyUIError("Prompt not found in history after completion")
 
-        return history[prompt_id]
+        result = history[prompt_id]
+
+        # Check for errors in result
+        status = result.get("status", {})
+        if status.get("status_str") == "error":
+            messages = status.get("messages", [])
+            error_msg = "\n".join(str(m) for m in messages)
+            raise ComfyUIError(f"Execution failed:\n{error_msg}")
+
+        return result
+
+    def _format_execution_error(self, error_data: dict) -> str:
+        """Format execution error data into readable message."""
+        lines = []
+
+        exception_type = error_data.get("exception_type", "Unknown")
+        exception_message = error_data.get("exception_message", "No details")
+        node_id = error_data.get("node_id", "unknown")
+        node_type = error_data.get("node_type", "unknown")
+
+        lines.append(f"Node '{node_id}' ({node_type}) failed:")
+        lines.append(f"  {exception_type}: {exception_message}")
+
+        # Add traceback if available
+        traceback = error_data.get("traceback", [])
+        if traceback:
+            lines.append("\nTraceback:")
+            for line in traceback[-5:]:  # Last 5 lines
+                lines.append(f"  {line.strip()}")
+
+        return "\n".join(lines)
 
     def execute_workflow(
         self,
         workflow: dict,
         timeout: int = 600,
         on_progress: Callable | None = None,
+        validate: bool = True,
     ) -> dict:
         """
         Execute a workflow and wait for completion.
@@ -268,6 +452,7 @@ class ComfyUIClient:
             workflow: ComfyUI workflow dict (API format)
             timeout: Maximum time to wait in seconds
             on_progress: Optional callback for progress updates
+            validate: If True, validate workflow before submission
 
         Returns:
             Execution result with outputs
@@ -278,7 +463,7 @@ class ComfyUIClient:
                 "Please ensure ComfyUI is running."
             )
 
-        prompt_id = self.queue_prompt(workflow)
+        prompt_id = self.queue_prompt(workflow, validate=validate)
         if on_progress:
             on_progress(f"Job queued: {prompt_id}")
 
@@ -377,7 +562,10 @@ def load_workflow(workflow_path: str) -> dict:
         raise FileNotFoundError(f"Workflow not found: {workflow_path}")
 
     with open(path, "r") as f:
-        return json.load(f)
+        workflow = json.load(f)
+
+    # Filter out non-node entries like _comment
+    return {k: v for k, v in workflow.items() if isinstance(v, dict)}
 
 
 def update_workflow_value(
@@ -408,6 +596,45 @@ def update_workflow_value(
     return workflow
 
 
+def find_node_by_title(workflow: dict, title: str) -> str | None:
+    """
+    Find a node ID by its title (from _meta).
+
+    Args:
+        workflow: Workflow dict
+        title: Title to search for
+
+    Returns:
+        Node ID or None if not found
+    """
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict):
+            continue
+        meta = node_data.get("_meta", {})
+        if meta.get("title", "").lower() == title.lower():
+            return node_id
+    return None
+
+
+def find_node_by_class(workflow: dict, class_type: str) -> str | None:
+    """
+    Find first node ID by class type.
+
+    Args:
+        workflow: Workflow dict
+        class_type: Class type to search for
+
+    Returns:
+        Node ID or None if not found
+    """
+    for node_id, node_data in workflow.items():
+        if not isinstance(node_data, dict):
+            continue
+        if node_data.get("class_type") == class_type:
+            return node_id
+    return None
+
+
 # Convenience function for testing
 def test_connection():
     """Test connection to ComfyUI server."""
@@ -427,6 +654,21 @@ def test_connection():
             vram_total = device.get("vram_total", 0) / (1024**3)
             vram_free = device.get("vram_free", 0) / (1024**3)
             print(f"    VRAM: {vram_free:.1f}GB free / {vram_total:.1f}GB total")
+
+        # Test fetching object info
+        print("\nFetching available nodes...")
+        try:
+            object_info = client.get_object_info()
+            print(f"  {len(object_info)} node types available")
+
+            # Check for WAN nodes
+            wan_nodes = [n for n in object_info if "wan" in n.lower()]
+            if wan_nodes:
+                print(f"  WAN nodes found: {len(wan_nodes)}")
+                for node in sorted(wan_nodes)[:10]:
+                    print(f"    - {node}")
+        except Exception as e:
+            print(f"  Failed to fetch nodes: {e}")
 
         return True
     else:

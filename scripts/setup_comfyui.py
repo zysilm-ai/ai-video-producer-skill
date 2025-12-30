@@ -58,30 +58,6 @@ MODELS = {
     },
 }
 
-# Optional Flux models for image generation
-FLUX_MODELS = {
-    "unet/flux1-schnell-Q4_K_S.gguf": {
-        "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_K_S.gguf",
-        "size_gb": 6.8,
-        "required": False,
-    },
-    "clip/clip_l.safetensors": {
-        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
-        "size_gb": 0.2,
-        "required": False,
-    },
-    "clip/t5xxl_fp8_e4m3fn.safetensors": {
-        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
-        "size_gb": 4.9,
-        "required": False,
-    },
-    "vae/ae.safetensors": {
-        "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors",
-        "size_gb": 0.3,
-        "required": False,
-    },
-}
-
 
 def print_status(message: str, status: str = "info"):
     """Print a status message with color."""
@@ -249,7 +225,7 @@ def download_file(url: str, target: Path, desc: str = None):
         return False
 
 
-def download_models(comfyui_dir: Path, include_flux: bool = True):
+def download_models(comfyui_dir: Path):
     """Download required models."""
     print_status("Downloading models (this may take a while)...", "progress")
 
@@ -257,9 +233,6 @@ def download_models(comfyui_dir: Path, include_flux: bool = True):
 
     # Calculate total size
     total_size = sum(m["size_gb"] for m in MODELS.values() if m["required"])
-    if include_flux:
-        total_size += sum(m["size_gb"] for m in FLUX_MODELS.values())
-
     print_status(f"Total download size: ~{total_size:.1f}GB", "info")
 
     # Download WAN models
@@ -267,15 +240,7 @@ def download_models(comfyui_dir: Path, include_flux: bool = True):
         if info["required"]:
             target = models_dir / path
             if not download_file(info["url"], target, path):
-                if info["required"]:
-                    return False
-
-    # Download Flux models (optional)
-    if include_flux:
-        print_status("Downloading Flux models for image generation...", "progress")
-        for path, info in FLUX_MODELS.items():
-            target = models_dir / path
-            download_file(info["url"], target, path)
+                return False
 
     print_status("Models downloaded", "success")
     return True
@@ -393,11 +358,6 @@ def main():
         help="Download models only"
     )
     parser.add_argument(
-        "--no-flux",
-        action="store_true",
-        help="Skip Flux model download (image generation)"
-    )
-    parser.add_argument(
         "--dir",
         type=Path,
         default=COMFYUI_DIR,
@@ -433,7 +393,7 @@ def main():
         if not comfyui_dir.exists():
             print_status("ComfyUI not installed. Run full setup first.", "error")
             return 1
-        download_models(comfyui_dir, include_flux=not args.no_flux)
+        download_models(comfyui_dir)
         return 0
 
     # Full setup
@@ -456,7 +416,7 @@ def main():
     setup_custom_nodes(comfyui_dir)
 
     # Download models
-    if not download_models(comfyui_dir, include_flux=not args.no_flux):
+    if not download_models(comfyui_dir):
         print_status("Model download failed. Run again with --models", "error")
         return 1
 

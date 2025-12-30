@@ -96,6 +96,73 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}m {secs:.1f}s"
 
 
+def get_vram_gb() -> float | None:
+    """
+    Get available VRAM in gigabytes.
+
+    Returns:
+        VRAM in GB or None if unavailable
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    except ImportError:
+        pass
+    return None
+
+
+def get_recommended_resolution(vram_gb: float | None = None) -> dict:
+    """
+    Get recommended resolution based on available VRAM.
+
+    Args:
+        vram_gb: VRAM in GB (auto-detected if None)
+
+    Returns:
+        Dict with width, height, num_frames keys
+    """
+    if vram_gb is None:
+        vram_gb = get_vram_gb()
+
+    if vram_gb is None:
+        # Default to medium if can't detect
+        return {"width": 832, "height": 480, "num_frames": 49, "preset": "medium"}
+
+    if vram_gb >= 16:
+        return {"width": 1280, "height": 720, "num_frames": 81, "preset": "high"}
+    elif vram_gb >= 10:
+        return {"width": 832, "height": 480, "num_frames": 49, "preset": "medium"}
+    else:
+        return {"width": 640, "height": 384, "num_frames": 49, "preset": "low"}
+
+
+def print_system_info() -> None:
+    """Print system information for debugging."""
+    print_status("System Information:", "info")
+
+    # Python version
+    import platform
+    print(f"  Python: {platform.python_version()}")
+    print(f"  Platform: {platform.system()} {platform.release()}")
+
+    # CUDA/GPU info
+    try:
+        import torch
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            print(f"  GPU: {device_name}")
+            print(f"  VRAM: {vram_total:.1f} GB")
+
+            rec = get_recommended_resolution(vram_total)
+            print(f"  Recommended preset: {rec['preset']} ({rec['width']}x{rec['height']})")
+        else:
+            print("  GPU: Not available (CUDA not found)")
+    except ImportError:
+        print("  GPU: Unknown (PyTorch not installed)")
+
+
 def build_enhanced_prompt(
     base_prompt: str,
     style_config: dict[str, Any] | None = None,
