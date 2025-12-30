@@ -106,7 +106,9 @@ def update_workflow_params(
     ]
 
     encode_classes = [
+        "Wan22ImageToVideoLatent",
         "WanVideoImageToVideoEncode",
+        "WanVideoEmptyEmbeds",
         "EmptyLatentImage",
         "EmptySD3LatentImage",
     ]
@@ -139,6 +141,9 @@ def update_workflow_params(
             # For WAN image generation, use 1 frame
             if "num_frames" in inputs:
                 workflow[node_id]["inputs"]["num_frames"] = 1
+            # Wan22ImageToVideoLatent uses 'length' instead of 'num_frames'
+            if "length" in inputs:
+                workflow[node_id]["inputs"]["length"] = 1
 
     return workflow
 
