@@ -1,6 +1,6 @@
-# Gemini Video Producer Skill
+# AI Video Producer Skill
 
-A Claude Code skill for complete AI video production workflows using Google Gemini and Veo APIs.
+A Claude Code skill for complete AI video production workflows using **WAN 2.2** video generation via **ComfyUI**. Runs entirely locally on consumer GPUs (RTX 3080+).
 
 ## Overview
 
@@ -9,10 +9,18 @@ This skill guides you through creating professional AI-generated videos with a s
 1. **Production Philosophy** - Define visual style, motion language, and narrative approach
 2. **Scene Breakdown** - Decompose video into scenes with keyframe requirements
 3. **Keyframe Generation** - Create start/end frames with visual consistency
-4. **Video Synthesis** - Generate video segments using Veo API
+4. **Video Synthesis** - Generate video segments using WAN 2.2 (local, fast)
 5. **Review & Iterate** - Refine based on feedback
 
 The philosophy-first approach ensures visual coherence across all scenes, resulting in professional, cohesive videos.
+
+## Key Features
+
+- **100% Local** - No cloud APIs needed, runs on your GPU
+- **Fast Generation** - ~2 minutes per 5-second clip with LightX2V optimization
+- **Low VRAM** - Works on 10GB+ GPUs using GGUF quantization
+- **High Quality** - 8-step distillation LoRA maintains quality at high speed
+- **Two Modes** - Image-to-Video (I2V) and First-Last-Frame (FLF2V)
 
 ## Supported Video Types
 
@@ -23,297 +31,326 @@ The philosophy-first approach ensures visual coherence across all scenes, result
 - **Corporate** - Demos, presentations, training
 - **Game Trailers** - Action sequences, atmosphere, gameplay hints
 
-## Prerequisites
+## System Requirements
 
-### 1. Google API Key
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| GPU VRAM | 10GB | 12GB+ |
+| RAM | 16GB | 32GB |
+| Storage | 15GB free | 30GB+ |
+| OS | Windows/Linux | Windows 10/11, Ubuntu 22.04+ |
 
-You need a Google API key with access to Gemini and Veo APIs.
+**Required Software:** Python 3.10+, Git, CUDA 12.x
 
-1. Go to [Google AI Studio](https://aistudio.google.com/)
-2. Create or select a project
-3. Generate an API key
-4. Enable Gemini and Veo APIs (Veo may require waitlist approval)
+## Usage
 
-### 2. Python Environment
+### With Claude Code (Recommended)
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+Simply describe what video you want to create. Claude will automatically:
+- Check and run setup if needed (downloads ~15GB of models on first run)
+- Start ComfyUI server
+- Guide you through the production workflow
+- Generate keyframes and videos
 
-# Or install directly
-pip install google-genai
+**Example conversation:**
 ```
-
-### 3. Set Environment Variable
-
-```bash
-export GOOGLE_API_KEY="your-api-key-here"
-
-# For persistence, add to your shell profile:
-echo 'export GOOGLE_API_KEY="your-api-key"' >> ~/.bashrc
-```
-
-## Installation
-
-### For Claude Code
-
-Copy this skill to your Claude Code skills directory:
-
-```bash
-# Personal skills (available in all projects)
-cp -r gemini-video-producer-skill ~/.claude/skills/
-
-# Or project-specific skills
-cp -r gemini-video-producer-skill /path/to/your/project/.claude/skills/
-```
-
-### For Other Environments
-
-The scripts can be used standalone without Claude Code:
-
-```bash
-cd gemini-video-producer-skill
-
-# Generate an image
-python scripts/gemini_image.py --prompt "A sunset over mountains" --output sunset.png
-
-# Generate a video
-python scripts/veo_video.py --prompt "Camera slowly pans across mountain range at sunset" --output sunset.mp4
-```
-
-## Using with Claude Code
-
-When using this skill with Claude Code, simply describe what video you want to create. Claude will:
-
-1. Help you develop a Production Philosophy
-2. Guide you through scene planning
-3. Generate keyframes and videos
-4. Iterate based on your feedback
-
-Example conversation:
-```
-You: I want to create a 30-second product demo for a smartwatch
+You: I want to create a 15-second product demo for a smartwatch
 
 Claude: I'll help you create a product demo video. Let's start by
 establishing a Production Philosophy...
 ```
 
-## Manual Workflow
+**The workflow:**
+1. Claude creates philosophy.md, style.json, scene-breakdown.md
+2. You approve each keyframe before video generation
+3. Videos are generated scene by scene
+4. Review and iterate until satisfied
 
-### Step 1: Create Production Philosophy
+### Manual / Standalone Usage
 
-Start by defining your visual style. Create a `style.json` file or use the example:
+For using the scripts without Claude Code.
+
+#### 1. Setup (First Time Only)
 
 ```bash
-cp assets/example-style.json outputs/style.json
-# Edit outputs/style.json with your project's visual direction
+cd gemini-video-producer-skill
+
+# Full automatic setup (~15GB download)
+python scripts/setup_comfyui.py
+
+# Check setup status
+python scripts/setup_comfyui.py --check
 ```
 
-### Step 2: Plan Your Scenes
+This will:
+1. Clone ComfyUI
+2. Install custom nodes (ComfyUI-GGUF, VideoHelperSuite, etc.)
+3. Download WAN 2.2 GGUF model (~8.5GB)
+4. Download UMT5-XXL text encoder (~4.9GB)
+5. Download VAE (~0.2GB)
+6. Download LightX2V distillation LoRA (~0.7GB)
 
-Break your video into scenes. For each scene, identify:
-- Duration (max 8 seconds per segment)
-- Required keyframes (start, end, or both)
-- Motion/action description
+See [SETUP.md](SETUP.md) for detailed manual installation instructions.
 
-### Step 3: Generate Keyframes
+#### 2. Start ComfyUI Server
 
 ```bash
-# Set your API key
-export GOOGLE_API_KEY="your-key"
+# Using setup script
+python scripts/setup_comfyui.py --start
 
-# Generate a starting keyframe
-python scripts/gemini_image.py \
+# Or manually
+cd D:/ComfyUI && python main.py --listen 0.0.0.0 --port 8188
+```
+
+#### 3. Generate Keyframe Image
+
+```bash
+python scripts/wan_image.py \
   --prompt "A warrior stands ready for battle, dramatic lighting" \
-  --style-ref outputs/style.json \
-  --output outputs/scene-01/keyframe-start.png
+  --output outputs/scene-01/keyframe-start.png \
+  --width 832 --height 480
 ```
 
-### Step 4: Generate Video
+#### 4. Generate Video (Image-to-Video)
 
 ```bash
-# Single-frame mode (start frame only)
-python scripts/veo_video.py \
-  --prompt "The warrior charges forward, cape flowing" \
+python scripts/wan_video.py \
+  --prompt "The warrior charges forward, cape flowing in the wind" \
   --start-frame outputs/scene-01/keyframe-start.png \
-  --style-ref outputs/style.json \
-  --output outputs/scene-01/video.mp4
+  --output outputs/scene-01/video.mp4 \
+  --preset medium
+```
 
-# Dual-frame mode (precise control)
-python scripts/veo_video.py \
+#### 5. Generate Video (First-Last-Frame)
+
+```bash
+python scripts/wan_video.py \
   --prompt "Warrior swings sword in powerful arc" \
   --start-frame outputs/scene-01/keyframe-start.png \
   --end-frame outputs/scene-01/keyframe-end.png \
   --output outputs/scene-01/video.mp4
 ```
 
-### Step 5: Review and Iterate
+### Resolution Presets
 
-Review the generated video. If adjustments are needed:
-- Modify keyframes OR prompts (not both at once)
-- Regenerate
-- Repeat until satisfied
+| Preset | Resolution | Frames | Use Case |
+|--------|------------|--------|----------|
+| low | 640x384 | 49 | Quick tests, low VRAM |
+| medium | 832x480 | 81 | Balanced quality/speed |
+| high | 1280x720 | 81 | High quality (12GB+ VRAM) |
+
+## Architecture
+
+### Workflow Pipeline
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Prompt    │────▶│  Text Enc   │────▶│   CLIP      │
+│   (user)    │     │  (UMT5-XXL) │     │  Encode     │
+└─────────────┘     └─────────────┘     └──────┬──────┘
+                                               │
+┌─────────────┐     ┌─────────────┐            │
+│   Image     │────▶│   Scale &   │────────────┤
+│   (keyframe)│     │   Encode    │            │
+└─────────────┘     └─────────────┘            │
+                                               ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  GGUF Model │────▶│  LightX2V   │────▶│  KSampler   │
+│  (WAN 2.2)  │     │    LoRA     │     │  (8 steps)  │
+└─────────────┘     └─────────────┘     └──────┬──────┘
+                                               │
+                                               ▼
+                                        ┌─────────────┐
+                                        │ VAE Decode  │
+                                        │  + Video    │
+                                        └─────────────┘
+```
+
+### Key Components
+
+| Component | Model | Purpose |
+|-----------|-------|---------|
+| Video Model | WAN 2.2 I2V (GGUF Q4_K_M) | 14B parameter video generation |
+| Text Encoder | UMT5-XXL (FP8) | Text understanding |
+| Distillation LoRA | LightX2V rank64 | Enables 8-step generation |
+| VAE | WAN 2.1 VAE | Latent encoding/decoding |
+
+### Generation Settings
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Steps | 8 | With LightX2V LoRA |
+| CFG | 1.0 | Guidance baked into LoRA |
+| Sampler | uni_pc | Fast, stable |
+| Scheduler | simple | |
+| LoRA Strength | 1.25 | Optimized for I2V |
+| Resolution | Up to 832x480 | Adjustable presets |
+| Frame Rate | 16 fps | ~5 sec per clip |
+
+### Model Locations
+
+After setup, models are stored in:
+
+```
+ComfyUI/models/
+├── diffusion_models/
+│   └── wan2.2_i2v_low_noise_14B_Q4_K_M.gguf
+├── text_encoders/
+│   └── umt5_xxl_fp8_e4m3fn_scaled.safetensors
+├── vae/
+│   └── wan_2.1_vae.safetensors
+└── loras/
+    └── Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors
+```
+
+## Script Reference
+
+### wan_video.py
+
+Generate videos from prompts and keyframes.
+
+```bash
+python scripts/wan_video.py \
+  --prompt "Motion description" \
+  --output path/to/output.mp4 \
+  [--start-frame path/to/start.png] \
+  [--end-frame path/to/end.png] \
+  [--style-ref path/to/style.json] \
+  [--preset low|medium|high] \
+  [--steps 8] \
+  [--cfg 1.0] \
+  [--seed 0]
+```
+
+### wan_image.py
+
+Generate keyframe images.
+
+```bash
+python scripts/wan_image.py \
+  --prompt "Image description" \
+  --output path/to/output.png \
+  [--style-ref path/to/style.json] \
+  [--reference path/to/reference.png] \
+  [--width 832] [--height 480]
+```
+
+### setup_comfyui.py
+
+Setup and manage ComfyUI installation.
+
+```bash
+python scripts/setup_comfyui.py              # Full setup
+python scripts/setup_comfyui.py --check      # Check status
+python scripts/setup_comfyui.py --start      # Start server
+python scripts/setup_comfyui.py --models     # Download models only
+```
 
 ## Directory Structure
 
 ```
 gemini-video-producer-skill/
-├── SKILL.md                 # Core skill instructions for Claude
+├── SKILL.md                 # Claude Code skill instructions
 ├── README.md                # This file
+├── SETUP.md                 # Detailed setup guide
 ├── requirements.txt         # Python dependencies
-├── LICENSE.txt              # MIT License
 ├── scripts/
-│   ├── utils.py             # Shared utilities
-│   ├── gemini_image.py      # Image generation
-│   ├── veo_video.py         # Video generation
-│   └── status_checker.py    # Check async job status
+│   ├── wan_video.py         # Video generation
+│   ├── wan_image.py         # Image generation
+│   ├── setup_comfyui.py     # Auto-setup script
+│   ├── comfyui_client.py    # ComfyUI API client
+│   └── workflows/
+│       ├── wan_i2v.json     # Image-to-Video workflow
+│       └── wan_flf2v.json   # First-Last-Frame workflow
 ├── references/
-│   ├── prompt-engineering.md    # Detailed prompt writing guide
-│   ├── style-systems.md         # Visual consistency guide
-│   └── troubleshooting.md       # Common issues and solutions
-└── assets/
-    └── example-style.json   # Example style configuration
+│   ├── prompt-engineering.md
+│   ├── style-systems.md
+│   └── troubleshooting.md
+└── outputs/                 # Generated content
 ```
 
-## Script Reference
+## Workflow JSON Structure
 
-### gemini_image.py
+The video generation uses optimized ComfyUI workflows:
 
-Generate images for keyframes.
+### Image-to-Video (wan_i2v.json)
 
-```bash
-python scripts/gemini_image.py \
-  --prompt "Description of the image" \
-  --output path/to/output.png \
-  [--style-ref path/to/style.json] \
-  [--reference path/to/reference.png] \
-  [--aspect-ratio 16:9|9:16|1:1|4:3]
+```
+UnetLoaderGGUF → ModelSamplingSD3 → LoraLoader (LightX2V)
+                                          ↓
+CLIPLoader → CLIPTextEncode (pos/neg) → WanImageToVideo
+                                          ↓
+LoadImage → ImageScale → ─────────────────┘
+                                          ↓
+                            KSampler (8 steps, CFG 1.0)
+                                          ↓
+                            VAEDecode → VHS_VideoCombine
 ```
 
-### veo_video.py
+### Key Workflow Features
 
-Generate videos from prompts and/or keyframes.
-
-```bash
-python scripts/veo_video.py \
-  --prompt "Description of motion and action" \
-  --output path/to/output.mp4 \
-  [--start-frame path/to/start.png] \
-  [--end-frame path/to/end.png] \
-  [--style-ref path/to/style.json] \
-  [--duration 1-8] \
-  [--resolution 720p|1080p] \
-  [--no-audio]
-```
-
-### status_checker.py
-
-Monitor async generation jobs.
-
-```bash
-# List recent operations
-python scripts/status_checker.py list
-
-# Check specific operation
-python scripts/status_checker.py check <operation-name>
-```
-
-## Generation Strategies
-
-| Scenario | Strategy | Keyframes |
-|----------|----------|-----------|
-| Continuous motion (running, flying) | Single-frame (start) | 1 |
-| Ambient/atmospheric scenes | Single-frame (end) | 1 |
-| Precise action/transformation | Dual-frame | 2 |
-| Long take (>8 seconds) | Multi-segment | 3+ |
-
-### Multi-Segment Long Takes
-
-For sequences longer than 8 seconds, chain keyframes:
-
-1. Define keyframes: A, B, C, D
-2. Generate segments: A→B, B→C, C→D
-3. Stitch in video editing software
-
-## Workflow Tips
-
-### Maintaining Consistency
-
-1. **Create a style.json first** - Use it for all generations
-2. **Generate all keyframes before videos** - Review for consistency
-3. **Use reference images** - Provide character refs with `--reference`
-4. **Copy style sections** - Keep style text identical across prompts
-
-### Common Pitfalls
-
-| Issue | Solution |
-|-------|----------|
-| Subject distorts on rotation | Add intermediate keyframe, limit rotation to <90° |
-| Style drift between scenes | Reinforce style in every prompt |
-| Unnatural motion | Add specific motion descriptors (speed, weight) |
-| Audio mismatch | Add audio cues to prompt or use `--no-audio` |
-
-### Prompt Writing
-
-**Good prompt structure:**
-```
-[Subject]. [Action/motion]. [Environment]. [Style]. [Constraints].
-```
-
-**Example:**
-```
-A young woman in a flowing dress stands at cliff edge.
-She slowly raises her arms as wind catches her hair.
-Ocean waves crash below, dramatic clouds above.
-Cinematic wide shot, golden hour, film grain.
-Character remains facing ocean, no rotation.
-```
-
-See `references/prompt-engineering.md` for detailed guidance.
-
-## API Costs
-
-Approximate costs (as of late 2024):
-
-| Service | Cost |
-|---------|------|
-| Gemini API (images) | Varies by model |
-| Veo 2 (Gemini API) | ~$0.35/second of video |
-| Veo 2 (Vertex AI) | ~$0.25-0.50/second |
-
-Always confirm current pricing at [Google AI Pricing](https://ai.google.dev/pricing).
+- **LightX2V LoRA**: Enables 8-step generation (vs 20-40 without)
+- **CFG 1.0**: Guidance baked into distillation LoRA
+- **Native nodes**: Uses stable ComfyUI core nodes
+- **GGUF quantization**: Reduces VRAM from 24GB to 10GB
 
 ## Troubleshooting
 
-### API Key Issues
+### ComfyUI Not Running
 
 ```bash
-# Verify key is set
-echo $GOOGLE_API_KEY
+# Check if ComfyUI is accessible
+python scripts/comfyui_client.py
 
-# Test with a simple request
-python -c "from google import genai; print(genai.Client(api_key='$GOOGLE_API_KEY'))"
+# Start ComfyUI
+python scripts/setup_comfyui.py --start
 ```
 
-### Generation Timeout
+### Out of VRAM
 
-Increase max wait time:
+Use lower resolution preset:
 ```bash
-python scripts/veo_video.py --prompt "..." --output out.mp4 --max-wait 900
+python scripts/wan_video.py --preset low ...
 ```
 
-### Rate Limiting
+### Slow Generation
 
-Wait 1-5 minutes and retry. Check quotas in Google Cloud Console.
+Ensure LightX2V LoRA is loaded (check setup):
+```bash
+python scripts/setup_comfyui.py --check
+```
 
-See `references/troubleshooting.md` for more solutions.
+### Poor Quality
+
+- Verify CFG is 1.0 (not 5.0)
+- Verify LoRA strength is 1.25
+- Check that LightX2V LoRA is installed
+
+See [references/troubleshooting.md](references/troubleshooting.md) for more solutions.
+
+## Performance
+
+### Generation Times (RTX 3080 10GB)
+
+| Preset | Resolution | Frames | Time |
+|--------|------------|--------|------|
+| low | 640x384 | 49 | ~1.5 min |
+| medium | 832x480 | 81 | ~2.5 min |
+| high | 1280x720 | 81 | ~4 min |
+
+### Optimization Credits
+
+The fast generation is made possible by:
+- [LightX2V](https://huggingface.co/lightx2v) - Step/CFG distillation LoRA
+- [CGPixel](https://www.patreon.com/cgpixel) - Optimized ComfyUI workflows
+- [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) - GGUF model support
 
 ## Contributing
 
 Contributions welcome! Areas for improvement:
 
-- Additional video API integrations (Runway, etc.)
-- Enhanced style transfer capabilities
+- Additional video model support
+- More resolution presets
 - Audio generation integration
 - Batch processing tools
 
@@ -323,4 +360,7 @@ MIT License - See LICENSE.txt
 
 ## Acknowledgments
 
-This skill was inspired by workflows shared by the AI video creation community, particularly the Gemini + Flow workflow for game trailer production.
+- WAN 2.2 model by Alibaba
+- LightX2V distillation by lightx2v team
+- CGPixel for workflow optimization techniques
+- ComfyUI community for excellent tooling

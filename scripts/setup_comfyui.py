@@ -26,7 +26,6 @@ COMFYUI_DIR = Path("D:/comfyui")
 
 CUSTOM_NODES = {
     "ComfyUI-GGUF": "https://github.com/city96/ComfyUI-GGUF.git",
-    "ComfyUI-WanVideoWrapper": "https://github.com/kijai/ComfyUI-WanVideoWrapper.git",
     "ComfyUI-VideoHelperSuite": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
     "ComfyUI-Manager": "https://github.com/ltdrdata/ComfyUI-Manager.git",
 }
@@ -34,18 +33,13 @@ CUSTOM_NODES = {
 # Model URLs and paths (relative to ComfyUI/models/)
 MODELS = {
     # WAN 2.2 GGUF models (Q4_K_M for 10GB VRAM)
-    "diffusion_models/wan2.2_i2v_high_noise_14B_Q4_K_M.gguf": {
-        "url": "https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF/resolve/main/wan2.2_i2v_high_noise_14B_Q4_K_M.gguf",
-        "size_gb": 8.5,
-        "required": True,
-    },
     "diffusion_models/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf": {
         "url": "https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF/resolve/main/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf",
         "size_gb": 8.5,
         "required": True,
     },
     # Text encoder
-    "clip/umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
+    "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
         "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
         "size_gb": 4.9,
         "required": True,
@@ -54,6 +48,12 @@ MODELS = {
     "vae/wan_2.1_vae.safetensors": {
         "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
         "size_gb": 0.2,
+        "required": True,
+    },
+    # LightX2V Distillation LoRA (enables 8-step fast generation with CFG 1.0)
+    "loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors": {
+        "url": "https://huggingface.co/lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v/resolve/main/loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+        "size_gb": 0.7,
         "required": True,
     },
 }

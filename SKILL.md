@@ -36,30 +36,20 @@ python {baseDir}/scripts/setup_comfyui.py --start
 
 The setup script will:
 1. Clone and configure ComfyUI
-2. Install required custom nodes (ComfyUI-GGUF, WanVideoWrapper, VideoHelperSuite)
-3. Download WAN 2.2 GGUF models (Q4_K_M for 10GB VRAM)
-4. Download Flux model for image generation
-5. Install all Python dependencies
+2. Install required custom nodes (ComfyUI-GGUF, VideoHelperSuite, ComfyUI-Manager)
+3. Download WAN 2.2 GGUF model (Q4_K_M for 10GB VRAM)
+4. Download UMT5-XXL text encoder
+5. Download LightX2V distillation LoRA (enables fast 8-step generation)
+6. Install all Python dependencies
 
 ### Before Each Session
 
-**Ensure ComfyUI is running before generating videos:**
+**Claude Code automatically handles ComfyUI:**
+- Checks if ComfyUI is running
+- Starts it if needed
+- Verifies the connection before generating
 
-```bash
-# Start ComfyUI (required before video generation)
-python {baseDir}/scripts/setup_comfyui.py --start
-```
-
-Or manually:
-```bash
-cd ~/ComfyUI && python main.py --listen 0.0.0.0 --port 8188
-```
-
-### Verify Setup
-
-```bash
-python {baseDir}/scripts/comfyui_client.py
-```
+No manual intervention required - just start your video project conversation.
 
 ### System Requirements
 
@@ -474,49 +464,35 @@ If user requests changes:
 At the START of the workflow, create this todo list:
 
 ```
-1. Check ComfyUI setup (run setup if needed)
-2. Start ComfyUI server if not running
-3. Create philosophy.md
-4. Create style.json
-5. Get user approval on production philosophy
-6. Create scene-breakdown.md
-7. Get user approval on scene breakdown
-8. Generate Scene 1 keyframes
-9. Get user approval on Scene 1 keyframes
-10. Generate Scene 1 video
-11. [Repeat 8-10 for each scene]
-12. Provide final summary to user
+1. Check ComfyUI setup and start server (automatic)
+2. Create philosophy.md
+3. Create style.json
+4. Get user approval on production philosophy
+5. Create scene-breakdown.md
+6. Get user approval on scene breakdown
+7. Generate Scene 1 keyframes
+8. Get user approval on Scene 1 keyframes
+9. Generate Scene 1 video
+10. [Repeat 7-9 for each scene]
+11. Provide final summary to user
 ```
 
 ### Auto-Setup Check (Step 1)
 
-Before starting video generation, check if ComfyUI is set up:
+Before starting video generation, automatically check and start ComfyUI:
 
 ```bash
 # Check setup status
 python {baseDir}/scripts/setup_comfyui.py --check
-```
 
-If setup is incomplete, run:
-```bash
-# Full automatic setup
+# If setup incomplete, run full setup
 python {baseDir}/scripts/setup_comfyui.py
-```
 
-### Start Server (Step 2)
-
-```bash
-# Verify ComfyUI is accessible
+# Verify ComfyUI is accessible, start if needed
 python {baseDir}/scripts/comfyui_client.py
 ```
 
-If not running, start it:
-```bash
-python {baseDir}/scripts/setup_comfyui.py --start
-```
-
-**Note:** The `--start` command runs in foreground. For background operation,
-the user should start ComfyUI in a separate terminal.
+If ComfyUI is not running, start it in the background before proceeding.
 
 ---
 
@@ -541,8 +517,20 @@ the user should start ComfyUI in a separate terminal.
 |-----------|-------|
 | Video Duration | ~5 seconds (81 frames) |
 | Frame Rate | 16 fps |
-| Resolution | Up to 720p |
-| VRAM Required | 10GB (Q4_K_M quantization) |
+| Resolution | Up to 832x480 (medium preset) |
+| VRAM Required | 10GB (GGUF Q4_K_M quantization) |
+| Steps | 8 (with LightX2V LoRA) |
+| CFG | 1.0 (guidance baked into LoRA) |
+| LoRA Strength | 1.25 (for I2V mode) |
+
+### Models Required
+
+| Model | Size | Purpose |
+|-------|------|---------|
+| wan2.2_i2v_low_noise_14B_Q4_K_M.gguf | 8.5GB | Video generation |
+| umt5_xxl_fp8_e4m3fn_scaled.safetensors | 4.9GB | Text encoder |
+| wan_2.1_vae.safetensors | 0.2GB | VAE |
+| Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors | 0.7GB | Fast generation LoRA |
 
 See `SETUP.md` for installation instructions.
 See `references/prompt-engineering.md` for detailed prompt writing guidance.
