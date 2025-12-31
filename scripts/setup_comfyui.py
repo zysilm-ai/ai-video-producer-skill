@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Auto-setup script for ComfyUI with WAN 2.2 video generation and Flux keyframe generation.
+Auto-setup script for ComfyUI with WAN 2.2 video generation and SD 3.5 keyframe generation.
 Downloads and configures everything needed to run the AI video skill.
+
+Uses SD 3.5 Large (GGUF quantized) for keyframe generation with ControlNet and IP-Adapter
+for character consistency across frames.
 
 Usage:
     python setup_comfyui.py              # Full setup
@@ -28,6 +31,8 @@ CUSTOM_NODES = {
     "ComfyUI-GGUF": "https://github.com/city96/ComfyUI-GGUF.git",
     "ComfyUI-VideoHelperSuite": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
     "ComfyUI-Manager": "https://github.com/ltdrdata/ComfyUI-Manager.git",
+    # SD 3.5 IP-Adapter for character consistency
+    "ComfyUI-InstantX-IPAdapter-SD3": "https://github.com/Slickytail/ComfyUI-InstantX-IPAdapter-SD3.git",
 }
 
 # Model URLs and paths (relative to ComfyUI/models/)
@@ -60,30 +65,60 @@ MODELS = {
         "required": True,
     },
     # ===========================================
-    # Flux Models (Keyframe/Image Generation)
+    # SD 3.5 Models (Keyframe/Image Generation)
     # ===========================================
-    # Flux Schnell GGUF (fast 4-step generation)
-    "unet/flux1-schnell-Q4_K_S.gguf": {
-        "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_K_S.gguf",
-        "size_gb": 6.8,
+    # SD 3.5 Large GGUF (Q4 quantization for 10GB VRAM)
+    "unet/sd3.5_large-Q4_0.gguf": {
+        "url": "https://huggingface.co/city96/stable-diffusion-3.5-large-gguf/resolve/main/sd3.5_large-Q4_0.gguf",
+        "size_gb": 4.8,
         "required": True,
     },
-    # Flux T5 Text encoder (FP8)
-    "clip/t5xxl_fp8_e4m3fn.safetensors": {
-        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
-        "size_gb": 4.9,
+    # SD 3.5 Text encoders (shared T5 already downloaded for WAN)
+    "clip/clip_g.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/clip_g.safetensors",
+        "size_gb": 1.4,
         "required": True,
     },
-    # Flux CLIP-L encoder
     "clip/clip_l.safetensors": {
-        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+        "url": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/clip_l.safetensors",
         "size_gb": 0.2,
         "required": True,
     },
-    # Flux VAE (from mirror - official requires login)
-    "vae/ae.safetensors": {
-        "url": "https://huggingface.co/ffxvs/vae-flux/resolve/main/ae.safetensors",
-        "size_gb": 0.3,
+    "clip/t5xxl_fp8_e4m3fn.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/t5xxl_fp8_e4m3fn.safetensors",
+        "size_gb": 4.9,
+        "required": True,
+    },
+    # SD 3.5 VAE (same as SD3, public mirror)
+    "vae/sd3.5_vae.safetensors": {
+        "url": "https://huggingface.co/diffusers-internal-dev/private-model/resolve/6e465cb8e03ddd0e34adf401d12d756c7c056ed1/sd3_vae.safetensors",
+        "size_gb": 0.2,
+        "required": True,
+    },
+    # ===========================================
+    # SD 3.5 ControlNet (Consistency Tools)
+    # ===========================================
+    "controlnet/sd3.5_large_controlnet_canny.safetensors": {
+        "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-controlnets/resolve/main/sd3.5_large_controlnet_canny.safetensors",
+        "size_gb": 2.5,
+        "required": True,
+    },
+    "controlnet/sd3.5_large_controlnet_depth.safetensors": {
+        "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-controlnets/resolve/main/sd3.5_large_controlnet_depth.safetensors",
+        "size_gb": 2.5,
+        "required": True,
+    },
+    # ===========================================
+    # SD 3.5 IP-Adapter (Character Consistency)
+    # ===========================================
+    "ipadapter/ip-adapter-sd3.bin": {
+        "url": "https://huggingface.co/InstantX/SD3.5-Large-IP-Adapter/resolve/main/ip-adapter.bin",
+        "size_gb": 1.0,
+        "required": True,
+    },
+    "clip_vision/siglip_vision_patch14_384.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
+        "size_gb": 0.9,
         "required": True,
     },
 }
@@ -370,7 +405,7 @@ def start_comfyui(comfyui_dir: Path, port: int = 8188):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Setup ComfyUI for AI video production (Flux keyframes + WAN 2.2 video)"
+        description="Setup ComfyUI for AI video production (SD 3.5 keyframes + WAN 2.2 video)"
     )
     parser.add_argument(
         "--check",
@@ -405,7 +440,7 @@ def main():
 
     print("\n" + "="*50)
     print("AI Video Producer Setup")
-    print("(Flux for keyframes + WAN 2.2 for video)")
+    print("(SD 3.5 for keyframes + WAN 2.2 for video)")
     print("="*50 + "\n")
 
     # Check only

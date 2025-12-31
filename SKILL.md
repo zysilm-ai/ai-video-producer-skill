@@ -1,7 +1,7 @@
 ---
 name: ai-video-producer
 description: >
-  Complete AI video production workflow using WAN 2.2 and Flux models via ComfyUI.
+  Complete AI video production workflow using WAN 2.2 and SD 3.5 models via ComfyUI.
   Creates any video type: promotional, educational, narrative, social media,
   animations, game trailers, music videos, product demos, and more. Use when
   users want to create videos with AI, need help with video storyboarding,
@@ -24,7 +24,7 @@ Create professional AI-generated videos through a structured, iterative workflow
 If ComfyUI is not detected, run the auto-setup script:
 
 ```bash
-# Full automatic setup (~27GB download)
+# Full automatic setup (~33GB download)
 python {baseDir}/scripts/setup_comfyui.py
 
 # Check setup status
@@ -296,7 +296,7 @@ mkdir -p {output_dir}/scene-02
 **Scene 1 - First keyframe (no reference needed):**
 ```bash
 # Scene 1: Start keyframe - establishes visual style
-python {baseDir}/scripts/flux_image.py \
+python {baseDir}/scripts/sd35_image.py \
   --prompt "[Detailed prompt from scene-breakdown.md]" \
   --style-ref {output_dir}/style.json \
   --output {output_dir}/scene-01/keyframe-start.png
@@ -305,7 +305,7 @@ python {baseDir}/scripts/flux_image.py \
 **Scene 1 - End keyframe (MUST reference start):**
 ```bash
 # Scene 1: End keyframe - MUST reference start for consistency
-python {baseDir}/scripts/flux_image.py \
+python {baseDir}/scripts/sd35_image.py \
   --prompt "[Detailed prompt - same characters in new pose/state]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-start.png \
@@ -315,7 +315,7 @@ python {baseDir}/scripts/flux_image.py \
 **Scene 2+ - Start keyframe (MUST reference previous scene):**
 ```bash
 # Scene 2: Start keyframe - MUST reference Scene 1's end keyframe
-python {baseDir}/scripts/flux_image.py \
+python {baseDir}/scripts/sd35_image.py \
   --prompt "[Detailed prompt for scene 2 start]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-end.png \
@@ -325,7 +325,7 @@ python {baseDir}/scripts/flux_image.py \
 **Multiple references for complex consistency:**
 ```bash
 # You can pass multiple --reference flags for better consistency
-python {baseDir}/scripts/flux_image.py \
+python {baseDir}/scripts/sd35_image.py \
   --prompt "[Detailed prompt]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-start.png \
@@ -500,7 +500,7 @@ If ComfyUI is not running, start it in the background before proceeding.
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `flux_image.py` | Generate keyframes (Flux Schnell) | `--prompt`, `--output`, `--style-ref`, `--reference` |
+| `sd35_image.py` | Generate keyframes (SD 3.5 + IP-Adapter) | `--prompt`, `--output`, `--style-ref`, `--reference` |
 | `wan_video.py` | Generate videos (WAN 2.2) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
 | `comfyui_client.py` | Test ComfyUI connection | (run directly to test) |
 
@@ -533,13 +533,22 @@ If ComfyUI is not running, start it in the background before proceeding.
 | wan_2.1_vae.safetensors | 0.2GB | WAN VAE |
 | Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors | 0.7GB | Fast generation LoRA |
 
-**Keyframe Generation (Flux Schnell):**
+**Keyframe Generation (SD 3.5 Large):**
 | Model | Size | Purpose |
 |-------|------|---------|
-| flux1-schnell-Q4_K_S.gguf | 6.8GB | Flux image generation |
-| t5xxl_fp8_e4m3fn.safetensors | 4.9GB | Flux T5 text encoder |
-| clip_l.safetensors | 0.2GB | Flux CLIP encoder |
-| ae.safetensors | 0.3GB | Flux VAE |
+| sd3.5_large-Q4_K_S.gguf | 4.8GB | SD 3.5 Large (GGUF quantized) |
+| clip_g.safetensors | 1.4GB | CLIP-G text encoder |
+| clip_l.safetensors | 0.2GB | CLIP-L text encoder |
+| t5xxl_fp8_e4m3fn.safetensors | 4.9GB | T5-XXL text encoder |
+| sd3.5_vae.safetensors | 0.2GB | SD 3.5 VAE |
+
+**Consistency Tools (ControlNet + IP-Adapter):**
+| Model | Size | Purpose |
+|-------|------|---------|
+| sd3.5_large_controlnet_canny.safetensors | 2.5GB | Edge-based control |
+| sd3.5_large_controlnet_depth.safetensors | 2.5GB | Depth-based control |
+| ip-adapter-sd3.bin | 1.0GB | Character consistency |
+| siglip_vision_patch14_384.safetensors | 0.9GB | IP-Adapter vision encoder |
 
 See `SETUP.md` for installation instructions.
 See `references/prompt-engineering.md` for detailed prompt writing guidance.

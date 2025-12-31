@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate keyframe images using Flux Schnell via ComfyUI.
+Generate keyframe images using Stable Diffusion 3.5 Large via ComfyUI.
 Used for creating keyframes in the AI video production workflow.
-Flux Schnell provides fast, high-quality image generation in 4 steps.
+SD 3.5 Large (GGUF quantized) provides high-quality images with ControlNet
+and IP-Adapter support for character consistency.
 """
 
 import argparse
@@ -28,8 +29,8 @@ from utils import (
 
 # Default workflow paths
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
-T2I_WORKFLOW = WORKFLOW_DIR / "flux_t2i.json"  # Flux Schnell for keyframes
-I2I_WORKFLOW = WORKFLOW_DIR / "wan_i2i.json"  # For reference-based generation
+T2I_WORKFLOW = WORKFLOW_DIR / "sd35_t2i.json"  # SD 3.5 Large for keyframes
+IPADAPTER_WORKFLOW = WORKFLOW_DIR / "sd35_ipadapter.json"  # SD 3.5 with IP-Adapter for consistency
 
 # Resolution presets for different VRAM levels
 RESOLUTION_PRESETS = {
@@ -156,25 +157,25 @@ def generate_image(
     width: int = 832,
     height: int = 480,
     seed: int = 0,
-    steps: int = 4,
-    cfg: float = 1.0,
+    steps: int = 28,
+    cfg: float = 4.5,
     resolution_preset: str = None,
     workflow_path: str | None = None,
     timeout: int = 300,
 ) -> str:
     """
-    Generate a keyframe image using Flux Schnell via ComfyUI.
+    Generate a keyframe image using Stable Diffusion 3.5 Large via ComfyUI.
 
     Args:
         prompt: Text prompt describing the image
         output_path: Path to save the generated image
         style_ref: Optional path to style configuration JSON
-        reference_image: Optional reference image for consistency
+        reference_image: Optional reference image for IP-Adapter consistency
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
-        steps: Number of sampling steps (4 for Flux Schnell)
-        cfg: Classifier-free guidance scale (1.0 for Flux Schnell)
+        steps: Number of sampling steps (28 for SD 3.5)
+        cfg: Classifier-free guidance scale (4.5 for SD 3.5)
         resolution_preset: Resolution preset ("low", "medium", "high")
         workflow_path: Optional custom workflow path
         timeout: Maximum time to wait for generation
@@ -213,21 +214,16 @@ def generate_image(
     if workflow_path:
         wf_path = Path(workflow_path)
         print_status("Using custom workflow")
-    elif reference_image and I2I_WORKFLOW.exists():
-        wf_path = I2I_WORKFLOW
-        print_status("Using I2I workflow with reference image")
+    elif reference_image and IPADAPTER_WORKFLOW.exists():
+        wf_path = IPADAPTER_WORKFLOW
+        print_status("Using IP-Adapter workflow for character consistency")
     elif T2I_WORKFLOW.exists():
         wf_path = T2I_WORKFLOW
-        print_status("Using T2I workflow")
+        print_status("Using SD 3.5 T2I workflow")
     else:
-        # Fall back to video workflow with num_frames=1
-        from wan_video import I2V_WORKFLOW
-        wf_path = I2V_WORKFLOW
-        print_status("Using I2V workflow with num_frames=1")
-        if not reference_image:
-            print_status("Warning: I2V workflow requires a reference image", "warning")
-            print_status("Please provide --reference or create a T2I workflow", "warning")
-            sys.exit(1)
+        print_status("SD 3.5 workflow not found!", "error")
+        print_status("Please ensure SD 3.5 workflows are set up correctly.", "error")
+        sys.exit(1)
 
     print_status(f"Generating image with prompt: {enhanced_prompt[:100]}...")
     print_status(f"Resolution: {width}x{height}, Steps: {steps}, CFG: {cfg}")
@@ -332,7 +328,7 @@ def generate_image(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate keyframe images using Flux Schnell via ComfyUI"
+        description="Generate keyframe images using Stable Diffusion 3.5 Large via ComfyUI"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -351,7 +347,7 @@ def main():
     parser.add_argument(
         "--reference", "-r",
         dest="reference_image",
-        help="Reference image path for consistency"
+        help="Reference image path for IP-Adapter character consistency"
     )
     parser.add_argument(
         "--width", "-W",
@@ -380,14 +376,14 @@ def main():
     parser.add_argument(
         "--steps",
         type=int,
-        default=4,
-        help="Number of sampling steps (default: 4 for Flux Schnell)"
+        default=28,
+        help="Number of sampling steps (default: 28 for SD 3.5)"
     )
     parser.add_argument(
         "--cfg",
         type=float,
-        default=1.0,
-        help="CFG scale (default: 1.0 for Flux Schnell)"
+        default=4.5,
+        help="CFG scale (default: 4.5 for SD 3.5)"
     )
     parser.add_argument(
         "--workflow",

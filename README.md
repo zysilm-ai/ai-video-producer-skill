@@ -47,7 +47,7 @@ The philosophy-first approach ensures visual coherence across all scenes, result
 ### With Claude Code (Recommended)
 
 Simply describe what video you want to create. Claude will automatically:
-- Check and run setup if needed (downloads ~27GB of models on first run)
+- Check and run setup if needed (downloads ~33GB of models on first run)
 - Start ComfyUI server
 - Guide you through the production workflow
 - Generate keyframes and videos
@@ -75,7 +75,7 @@ For using the scripts without Claude Code.
 ```bash
 cd gemini-video-producer-skill
 
-# Full automatic setup (~27GB download)
+# Full automatic setup (~33GB download)
 python scripts/setup_comfyui.py
 
 # Check setup status
@@ -89,9 +89,11 @@ This will:
 4. Download UMT5-XXL text encoder (~4.9GB)
 5. Download WAN VAE (~0.2GB)
 6. Download LightX2V distillation LoRA (~0.7GB)
-7. Download Flux Schnell GGUF model (~6.8GB)
-8. Download Flux text encoders (~5.1GB)
-9. Download Flux VAE (~0.3GB)
+7. Download SD 3.5 Large GGUF model (~4.8GB)
+8. Download SD 3.5 text encoders (~6.5GB)
+9. Download SD 3.5 VAE (~0.2GB)
+10. Download SD 3.5 ControlNet models (~5GB)
+11. Download IP-Adapter for character consistency (~2GB)
 
 See [SETUP.md](SETUP.md) for detailed manual installation instructions.
 
@@ -108,7 +110,7 @@ cd D:/ComfyUI && python main.py --listen 0.0.0.0 --port 8188
 #### 3. Generate Keyframe Image
 
 ```bash
-python scripts/flux_image.py \
+python scripts/sd35_image.py \
   --prompt "A warrior stands ready for battle, dramatic lighting" \
   --output outputs/scene-01/keyframe-start.png \
   --width 832 --height 480
@@ -225,12 +227,12 @@ python scripts/wan_video.py \
   [--seed 0]
 ```
 
-### flux_image.py
+### sd35_image.py
 
 Generate keyframe images.
 
 ```bash
-python scripts/flux_image.py \
+python scripts/sd35_image.py \
   --prompt "Image description" \
   --output path/to/output.png \
   [--style-ref path/to/style.json] \
@@ -259,7 +261,7 @@ gemini-video-producer-skill/
 ├── requirements.txt         # Python dependencies
 ├── scripts/
 │   ├── wan_video.py         # Video generation
-│   ├── flux_image.py        # Keyframe image generation (Flux)
+│   ├── sd35_image.py        # Keyframe image generation (SD 3.5 + IP-Adapter)
 │   ├── setup_comfyui.py     # Auto-setup script
 │   ├── comfyui_client.py    # ComfyUI API client
 │   └── workflows/

@@ -1,0 +1,127 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "sd3.5_large-Q4_0.gguf"
+    }
+  },
+  "2": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": ["1", 0],
+      "shift": 3.0
+    }
+  },
+  "3": {
+    "class_type": "TripleCLIPLoader",
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "clip_g.safetensors",
+      "clip_name3": "t5xxl_fp8_e4m3fn.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "{{PROMPT}}",
+      "clip": ["3", 0]
+    },
+    "_meta": {
+      "title": "Positive Prompt"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "blurry, low quality, distorted, deformed",
+      "clip": ["3", 0]
+    },
+    "_meta": {
+      "title": "Negative Prompt"
+    }
+  },
+  "6": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 832,
+      "height": 480,
+      "batch_size": 1
+    }
+  },
+  "7": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "sd3.5_vae.safetensors"
+    }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{REFERENCE}}"
+    },
+    "_meta": {
+      "title": "Reference Image"
+    }
+  },
+  "11": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "siglip_vision_patch14_384.safetensors"
+    }
+  },
+  "12": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": ["11", 0],
+      "image": ["10", 0],
+      "crop": "center"
+    }
+  },
+  "13": {
+    "class_type": "IPAdapterSD3Loader",
+    "inputs": {
+      "ipadapter": "ip-adapter-sd3.bin",
+      "provider": "cuda"
+    }
+  },
+  "14": {
+    "class_type": "ApplyIPAdapterSD3",
+    "inputs": {
+      "model": ["2", 0],
+      "ipadapter": ["13", 0],
+      "image_embed": ["12", 0],
+      "weight": 0.5,
+      "start_percent": 0.0,
+      "end_percent": 1.0
+    }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["14", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["6", 0],
+      "seed": 0,
+      "steps": 28,
+      "cfg": 4.5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1.0
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["8", 0],
+      "vae": ["7", 0]
+    }
+  },
+  "15": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["9", 0],
+      "filename_prefix": "sd35_consistent"
+    }
+  }
+}
