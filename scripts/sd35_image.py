@@ -30,7 +30,8 @@ from utils import (
 # Default workflow paths
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
 T2I_WORKFLOW = WORKFLOW_DIR / "sd35_t2i.json"  # SD 3.5 Large for keyframes
-IPADAPTER_WORKFLOW = WORKFLOW_DIR / "sd35_ipadapter.json"  # SD 3.5 with IP-Adapter for consistency
+IPADAPTER_WORKFLOW = WORKFLOW_DIR / "sd35_ipadapter.json"  # SD 3.5 with IP-Adapter only (style transfer)
+DEPTH_IPADAPTER_WORKFLOW = WORKFLOW_DIR / "sd35_depth_ipadapter.json"  # SD 3.5 with Depth ControlNet + IP-Adapter (spatial + identity)
 
 # Resolution presets for different VRAM levels
 RESOLUTION_PRESETS = {
@@ -149,6 +150,28 @@ def update_workflow_params(
     return workflow
 
 
+def update_controlnet_strength(workflow: dict, strength: float) -> dict:
+    """Update ControlNet strength in workflow."""
+    controlnet_classes = [
+        "ControlNetApplyAdvanced",
+        "ControlNetApply",
+        "ControlNetApplySD3",
+    ]
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+
+        class_type = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+
+        if class_type in controlnet_classes:
+            if "strength" in inputs:
+                workflow[node_id]["inputs"]["strength"] = strength
+
+    return workflow
+
+
 def generate_image(
     prompt: str,
     output_path: str,
@@ -162,6 +185,8 @@ def generate_image(
     resolution_preset: str = None,
     workflow_path: str | None = None,
     timeout: int = 300,
+    mode: str | None = None,
+    controlnet_strength: float = 0.7,
 ) -> str:
     """
     Generate a keyframe image using Stable Diffusion 3.5 Large via ComfyUI.
@@ -179,6 +204,8 @@ def generate_image(
         resolution_preset: Resolution preset ("low", "medium", "high")
         workflow_path: Optional custom workflow path
         timeout: Maximum time to wait for generation
+        mode: Generation mode - "action" (IP-Adapter only) or "static" (Depth + IP-Adapter)
+        controlnet_strength: ControlNet strength for static mode (0.0-1.0, default 0.7)
 
     Returns:
         Path to saved image
@@ -210,13 +237,39 @@ def generate_image(
     # Build enhanced prompt
     enhanced_prompt = build_enhanced_prompt(prompt, style_config)
 
-    # Determine workflow based on inputs
+    # Determine workflow based on inputs and mode
     if workflow_path:
         wf_path = Path(workflow_path)
         print_status("Using custom workflow")
-    elif reference_image and IPADAPTER_WORKFLOW.exists():
-        wf_path = IPADAPTER_WORKFLOW
-        print_status("Using IP-Adapter workflow for character consistency")
+    elif reference_image:
+        # Mode-based workflow selection for consistency
+        if mode == "action":
+            # Action mode: IP-Adapter only - allows pose/position changes
+            if IPADAPTER_WORKFLOW.exists():
+                wf_path = IPADAPTER_WORKFLOW
+                print_status("Using IP-Adapter workflow (action mode - free movement)")
+            else:
+                print_status("IP-Adapter workflow not found!", "error")
+                sys.exit(1)
+        elif mode == "static":
+            # Static mode: Depth + IP-Adapter - maintains spatial layout
+            if DEPTH_IPADAPTER_WORKFLOW.exists():
+                wf_path = DEPTH_IPADAPTER_WORKFLOW
+                print_status(f"Using Depth+IP-Adapter workflow (static mode - strength {controlnet_strength})")
+            else:
+                print_status("Depth+IP-Adapter workflow not found, falling back to IP-Adapter only", "warning")
+                wf_path = IPADAPTER_WORKFLOW
+        else:
+            # No mode specified - default to Depth+IP-Adapter if available (backwards compatible)
+            if DEPTH_IPADAPTER_WORKFLOW.exists():
+                wf_path = DEPTH_IPADAPTER_WORKFLOW
+                print_status(f"Using Depth+IP-Adapter workflow (default - strength {controlnet_strength})")
+            elif IPADAPTER_WORKFLOW.exists():
+                wf_path = IPADAPTER_WORKFLOW
+                print_status("Using IP-Adapter workflow (character consistency only)")
+            else:
+                print_status("No consistency workflow found!", "error")
+                sys.exit(1)
     elif T2I_WORKFLOW.exists():
         wf_path = T2I_WORKFLOW
         print_status("Using SD 3.5 T2I workflow")
@@ -268,6 +321,9 @@ def generate_image(
         cfg=cfg,
         seed=seed,
     )
+    # Update ControlNet strength if using static mode
+    if mode == "static" or (mode is None and wf_path == DEPTH_IPADAPTER_WORKFLOW):
+        workflow = update_controlnet_strength(workflow, controlnet_strength)
 
     # Execute workflow
     print_status("Submitting to ComfyUI...", "progress")
@@ -395,6 +451,17 @@ def main():
         default=300,
         help="Maximum time to wait in seconds (default: 300)"
     )
+    parser.add_argument(
+        "--mode", "-m",
+        choices=["action", "static"],
+        help="Generation mode: 'action' (IP-Adapter only, free movement) or 'static' (Depth+IP-Adapter, locked positions)"
+    )
+    parser.add_argument(
+        "--controlnet-strength",
+        type=float,
+        default=0.7,
+        help="ControlNet strength for static mode (0.0-1.0, default: 0.7). Lower values allow more position variation."
+    )
 
     args = parser.parse_args()
 
@@ -411,6 +478,8 @@ def main():
         resolution_preset=args.preset,
         workflow_path=args.workflow,
         timeout=args.timeout,
+        mode=args.mode,
+        controlnet_strength=args.controlnet_strength,
     )
 
 

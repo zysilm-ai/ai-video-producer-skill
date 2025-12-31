@@ -229,7 +229,7 @@ python scripts/wan_video.py \
 
 ### sd35_image.py
 
-Generate keyframe images.
+Generate keyframe images with character and spatial consistency.
 
 ```bash
 python scripts/sd35_image.py \
@@ -237,7 +237,42 @@ python scripts/sd35_image.py \
   --output path/to/output.png \
   [--style-ref path/to/style.json] \
   [--reference path/to/reference.png] \
+  [--mode action|static] \
+  [--controlnet-strength 0.7] \
   [--width 832] [--height 480]
+```
+
+#### Mode Selection
+
+| Mode | Workflow | Best For |
+|------|----------|----------|
+| `action` | IP-Adapter only | Fighting, sports, dancing - allows position changes |
+| `static` | Depth + IP-Adapter | Talking, standing, camera moves - locks positions |
+
+#### ControlNet Strength (static mode)
+
+| Strength | Effect |
+|----------|--------|
+| `0.7-1.0` | Strong spatial lock (default) |
+| `0.4-0.6` | Moderate - allows slight shifts |
+| `0.2-0.3` | Light guidance |
+
+**Example - Action scene (boxing):**
+```bash
+python scripts/sd35_image.py \
+  --prompt "Boxer lands a powerful punch" \
+  --reference keyframe-start.png \
+  --mode action \
+  --output keyframe-end.png
+```
+
+**Example - Static scene with custom strength:**
+```bash
+python scripts/sd35_image.py \
+  --prompt "Character turns head slightly" \
+  --reference keyframe-start.png \
+  --mode static --controlnet-strength 0.5 \
+  --output keyframe-end.png
 ```
 
 ### setup_comfyui.py

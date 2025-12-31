@@ -291,7 +291,45 @@ mkdir -p {output_dir}/scene-02
 # ... for each scene
 ```
 
-### Step 3.2: Generate Keyframes Per Scene
+### Step 3.2: Choose Workflow Based on Scene Type
+
+**CRITICAL: Different scene types require different consistency approaches.**
+
+| Scene Type | Examples | Workflow | Why |
+|------------|----------|----------|-----|
+| **Action/Dynamic** | Fighting, running, dancing, sports | IP-Adapter only | Allows pose/position changes |
+| **Static/Slow** | Talking, standing, slow camera moves | Depth + IP-Adapter | Maintains exact spatial layout |
+| **Camera Movement** | Pan, zoom, dolly (same subject) | Depth + IP-Adapter | Keeps subject position locked |
+
+**The `--mode` flag automatically selects the right workflow:**
+
+```bash
+# Action scenes - use "action" mode (IP-Adapter only)
+python {baseDir}/scripts/sd35_image.py \
+  --prompt "..." --reference ... --mode action --output ...
+
+# Static scenes - use "static" mode (Depth + IP-Adapter)
+python {baseDir}/scripts/sd35_image.py \
+  --prompt "..." --reference ... --mode static --output ...
+```
+
+**Fine-tune ControlNet strength for static scenes:**
+
+```bash
+# Default strength (0.7) - strong spatial lock
+python {baseDir}/scripts/sd35_image.py \
+  --prompt "..." --reference ... --mode static --output ...
+
+# Lower strength (0.3-0.5) - allows some position shift
+python {baseDir}/scripts/sd35_image.py \
+  --prompt "..." --reference ... --mode static --controlnet-strength 0.4 --output ...
+
+# Very low strength (0.1-0.2) - subtle spatial guidance only
+python {baseDir}/scripts/sd35_image.py \
+  --prompt "..." --reference ... --mode static --controlnet-strength 0.2 --output ...
+```
+
+### Step 3.3: Generate Keyframes Per Scene
 
 **Scene 1 - First keyframe (no reference needed):**
 ```bash
@@ -304,11 +342,21 @@ python {baseDir}/scripts/sd35_image.py \
 
 **Scene 1 - End keyframe (MUST reference start):**
 ```bash
-# Scene 1: End keyframe - MUST reference start for consistency
+# Scene 1: End keyframe - choose mode based on scene type
+# For ACTION scenes (fighting, sports, dynamic movement):
 python {baseDir}/scripts/sd35_image.py \
-  --prompt "[Detailed prompt - same characters in new pose/state]" \
+  --prompt "[Detailed prompt - dramatic new pose/action]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-start.png \
+  --mode action \
+  --output {output_dir}/scene-01/keyframe-end.png
+
+# For STATIC scenes (talking, slow movement, camera-only motion):
+python {baseDir}/scripts/sd35_image.py \
+  --prompt "[Detailed prompt - same position, different expression/detail]" \
+  --style-ref {output_dir}/style.json \
+  --reference {output_dir}/scene-01/keyframe-start.png \
+  --mode static \
   --output {output_dir}/scene-01/keyframe-end.png
 ```
 
@@ -500,9 +548,25 @@ If ComfyUI is not running, start it in the background before proceeding.
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `sd35_image.py` | Generate keyframes (SD 3.5 + IP-Adapter) | `--prompt`, `--output`, `--style-ref`, `--reference` |
+| `sd35_image.py` | Generate keyframes (SD 3.5 + IP-Adapter) | `--prompt`, `--output`, `--style-ref`, `--reference`, `--mode`, `--controlnet-strength` |
 | `wan_video.py` | Generate videos (WAN 2.2) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
 | `comfyui_client.py` | Test ComfyUI connection | (run directly to test) |
+
+### Keyframe Generation Modes
+
+| Mode | Workflow Used | Best For | Spatial Lock |
+|------|---------------|----------|--------------|
+| `action` | IP-Adapter only | Fighting, sports, dancing, running | None - free movement |
+| `static` | Depth + IP-Adapter | Talking, standing, camera moves | Strong - same positions |
+
+### ControlNet Strength Guide (static mode only)
+
+| Strength | Effect | Use Case |
+|----------|--------|----------|
+| `0.7-1.0` | Strong lock | Subject must stay in exact position |
+| `0.4-0.6` | Moderate | Allow slight position shift |
+| `0.2-0.3` | Light | Subtle guidance, more creative freedom |
+| `0.0-0.1` | Minimal | Almost no spatial constraint |
 
 ### Video Generation Modes
 

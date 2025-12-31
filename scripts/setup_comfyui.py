@@ -96,17 +96,17 @@ MODELS = {
         "required": True,
     },
     # ===========================================
-    # SD 3.5 ControlNet (Consistency Tools)
+    # SD 3.5 ControlNet (Consistency Tools) - from public mirror
     # ===========================================
     "controlnet/sd3.5_large_controlnet_canny.safetensors": {
-        "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-controlnets/resolve/main/sd3.5_large_controlnet_canny.safetensors",
-        "size_gb": 2.5,
-        "required": True,
+        "url": "https://huggingface.co/licyk/sd3_controlnet/resolve/main/sd3.5_large_controlnet_canny.safetensors",
+        "size_gb": 8.7,
+        "required": False,  # Optional - canny edge detection
     },
     "controlnet/sd3.5_large_controlnet_depth.safetensors": {
-        "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-controlnets/resolve/main/sd3.5_large_controlnet_depth.safetensors",
-        "size_gb": 2.5,
-        "required": True,
+        "url": "https://huggingface.co/licyk/sd3_controlnet/resolve/main/sd3.5_large_controlnet_depth.safetensors",
+        "size_gb": 8.7,
+        "required": True,  # Required for spatial consistency
     },
     # ===========================================
     # SD 3.5 IP-Adapter (Character Consistency)
