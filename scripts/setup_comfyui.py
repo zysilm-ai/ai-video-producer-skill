@@ -31,8 +31,8 @@ CUSTOM_NODES = {
     "ComfyUI-GGUF": "https://github.com/city96/ComfyUI-GGUF.git",
     "ComfyUI-VideoHelperSuite": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
     "ComfyUI-Manager": "https://github.com/ltdrdata/ComfyUI-Manager.git",
-    # SD 3.5 IP-Adapter for character consistency
-    "ComfyUI-InstantX-IPAdapter-SD3": "https://github.com/Slickytail/ComfyUI-InstantX-IPAdapter-SD3.git",
+    # Qwen Image support
+    "ComfyUI_RH_Qwen-Image": "https://github.com/HM-RunningHub/ComfyUI_RH_Qwen-Image.git",
 }
 
 # Model URLs and paths (relative to ComfyUI/models/)
@@ -65,60 +65,24 @@ MODELS = {
         "required": True,
     },
     # ===========================================
-    # SD 3.5 Models (Keyframe/Image Generation)
+    # Qwen Image Edit Models (Keyframe/Image Generation)
     # ===========================================
-    # SD 3.5 Large GGUF (Q4 quantization for 10GB VRAM)
-    "unet/sd3.5_large-Q4_0.gguf": {
-        "url": "https://huggingface.co/city96/stable-diffusion-3.5-large-gguf/resolve/main/sd3.5_large-Q4_0.gguf",
-        "size_gb": 4.8,
+    # Qwen Image Main Model (FP8)
+    "checkpoints/qwen_image_fp8_e4m3fn.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors",
+        "size_gb": 12.0, # Estimated
         "required": True,
     },
-    # SD 3.5 Text encoders (shared T5 already downloaded for WAN)
-    "clip/clip_g.safetensors": {
-        "url": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/clip_g.safetensors",
-        "size_gb": 1.4,
+    # Qwen Text Encoder (VL 7B)
+    "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "size_gb": 7.5, # Estimated
         "required": True,
     },
-    "clip/clip_l.safetensors": {
-        "url": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/clip_l.safetensors",
-        "size_gb": 0.2,
-        "required": True,
-    },
-    "clip/t5xxl_fp8_e4m3fn.safetensors": {
-        "url": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/t5xxl_fp8_e4m3fn.safetensors",
-        "size_gb": 4.9,
-        "required": True,
-    },
-    # SD 3.5 VAE (same as SD3, public mirror)
-    "vae/sd3.5_vae.safetensors": {
-        "url": "https://huggingface.co/diffusers-internal-dev/private-model/resolve/6e465cb8e03ddd0e34adf401d12d756c7c056ed1/sd3_vae.safetensors",
-        "size_gb": 0.2,
-        "required": True,
-    },
-    # ===========================================
-    # SD 3.5 ControlNet (Consistency Tools) - from public mirror
-    # ===========================================
-    "controlnet/sd3.5_large_controlnet_canny.safetensors": {
-        "url": "https://huggingface.co/licyk/sd3_controlnet/resolve/main/sd3.5_large_controlnet_canny.safetensors",
-        "size_gb": 8.7,
-        "required": False,  # Optional - canny edge detection
-    },
-    "controlnet/sd3.5_large_controlnet_depth.safetensors": {
-        "url": "https://huggingface.co/licyk/sd3_controlnet/resolve/main/sd3.5_large_controlnet_depth.safetensors",
-        "size_gb": 8.7,
-        "required": True,  # Required for spatial consistency
-    },
-    # ===========================================
-    # SD 3.5 IP-Adapter (Character Consistency)
-    # ===========================================
-    "ipadapter/ip-adapter-sd3.bin": {
-        "url": "https://huggingface.co/InstantX/SD3.5-Large-IP-Adapter/resolve/main/ip-adapter.bin",
-        "size_gb": 1.0,
-        "required": True,
-    },
-    "clip_vision/siglip_vision_patch14_384.safetensors": {
-        "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
-        "size_gb": 0.9,
+    # Qwen VAE
+    "vae/qwen_image_vae.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+        "size_gb": 0.2, # Estimated
         "required": True,
     },
 }

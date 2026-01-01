@@ -1,0 +1,35 @@
+{
+  "1": {
+    "class_type": "RH_Qwen_ModelLoader",
+    "inputs": {
+      "ckpt_name": "qwen_image_fp8_e4m3fn.safetensors",
+      "vae_name": "qwen_image_vae.safetensors",
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "RH_Qwen_Generator",
+    "inputs": {
+      "model": ["1", 0],
+      "vae": ["1", 1],
+      "clip": ["1", 2],
+      "prompt": "{{PROMPT}}",
+      "negative_prompt": "bad quality, worst quality",
+      "width": 832,
+      "height": 480,
+      "steps": 20,
+      "cfg": 3.5,
+      "seed": 0
+    },
+    "_meta": {
+      "title": "Qwen Generation"
+    }
+  },
+  "3": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["2", 0],
+      "filename_prefix": "qwen_keyframe"
+    }
+  }
+}

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate keyframe images using Stable Diffusion 3.5 Large via ComfyUI.
+Generate keyframe images using Qwen Image Edit 2509 via ComfyUI.
 Used for creating keyframes in the AI video production workflow.
-SD 3.5 Large (GGUF quantized) provides high-quality images with ControlNet
-and IP-Adapter support for character consistency.
+Qwen Image Edit provides high-quality images and text-driven editing
+for character consistency.
 """
 
 import argparse
@@ -29,9 +29,8 @@ from utils import (
 
 # Default workflow paths
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
-T2I_WORKFLOW = WORKFLOW_DIR / "sd35_t2i.json"  # SD 3.5 Large for keyframes
-IPADAPTER_WORKFLOW = WORKFLOW_DIR / "sd35_ipadapter.json"  # SD 3.5 with IP-Adapter only (style transfer)
-DEPTH_IPADAPTER_WORKFLOW = WORKFLOW_DIR / "sd35_depth_ipadapter.json"  # SD 3.5 with Depth ControlNet + IP-Adapter (spatial + identity)
+T2I_WORKFLOW = WORKFLOW_DIR / "qwen_t2i.json"
+EDIT_WORKFLOW = WORKFLOW_DIR / "qwen_edit.json"
 
 # Resolution presets for different VRAM levels
 RESOLUTION_PRESETS = {
@@ -51,23 +50,25 @@ def update_workflow_prompts(workflow: dict, prompt: str, negative_prompt: str = 
 
         class_type = node.get("class_type", "")
         inputs = node.get("inputs", {})
-        title = node.get("_meta", {}).get("title", "").lower()
+        
+        # Check for Qwen Generator inputs directly
+        if "prompt" in inputs and "{{PROMPT}}" in str(inputs["prompt"]):
+            workflow[node_id]["inputs"]["prompt"] = prompt
+            
+        if "negative_prompt" in inputs:
+            workflow[node_id]["inputs"]["negative_prompt"] = negative_prompt or default_negative
 
+        # Also support standard CLIPTextEncode if used in custom workflows
         if class_type == "CLIPTextEncode":
             current_text = inputs.get("text", "")
-
-            # Check if this is the positive prompt
-            if "{{PROMPT}}" in current_text or "positive" in title:
+            if "{{PROMPT}}" in current_text:
                 workflow[node_id]["inputs"]["text"] = prompt
-            # Check if this is the negative prompt
-            elif "negative" in title:
-                workflow[node_id]["inputs"]["text"] = negative_prompt or default_negative
 
     return workflow
 
 
 def update_workflow_images(workflow: dict, reference_image: str = None) -> dict:
-    """Update image inputs in workflow for I2I mode."""
+    """Update image inputs in workflow for Editing mode."""
     if not reference_image:
         return workflow
 
@@ -82,7 +83,7 @@ def update_workflow_images(workflow: dict, reference_image: str = None) -> dict:
         if class_type == "LoadImage":
             current_image = str(inputs.get("image", ""))
             # Update reference/input image
-            if "reference" in title or "input" in title or "{{REFERENCE}}" in current_image:
+            if "{{REFERENCE}}" in current_image or "reference" in title:
                 workflow[node_id]["inputs"]["image"] = reference_image
 
     return workflow
@@ -97,22 +98,13 @@ def update_workflow_params(
     seed: int = None,
 ) -> dict:
     """Update generation parameters in workflow."""
-    # For T2I, we use num_frames=1 to generate a single image
-    # Node classes that accept these parameters
+    
+    # Qwen Generator and other sampling nodes
     generation_classes = [
-        "WanImageToVideo",
-        "WanFirstLastFrameToVideo",
-        "WanVideoSampler",
+        "RH_Qwen_Generator",
         "KSampler",
         "KSamplerAdvanced",
-    ]
-
-    encode_classes = [
-        "Wan22ImageToVideoLatent",
-        "WanVideoImageToVideoEncode",
-        "WanVideoEmptyEmbeds",
-        "EmptyLatentImage",
-        "EmptySD3LatentImage",
+        "WanVideoSampler" 
     ]
 
     for node_id, node in workflow.items():
@@ -122,52 +114,17 @@ def update_workflow_params(
         class_type = node.get("class_type", "")
         inputs = node.get("inputs", {})
 
-        # Update generation nodes
         if class_type in generation_classes:
-            # For image generation, use num_frames=1
-            if "num_frames" in inputs:
-                workflow[node_id]["inputs"]["num_frames"] = 1
+            if width is not None and "width" in inputs:
+                workflow[node_id]["inputs"]["width"] = width
+            if height is not None and "height" in inputs:
+                workflow[node_id]["inputs"]["height"] = height
             if steps is not None and "steps" in inputs:
                 workflow[node_id]["inputs"]["steps"] = steps
             if cfg is not None and "cfg" in inputs:
                 workflow[node_id]["inputs"]["cfg"] = cfg
             if seed is not None and seed > 0 and "seed" in inputs:
                 workflow[node_id]["inputs"]["seed"] = seed
-
-        # Update latent/encode nodes (for resolution)
-        if class_type in encode_classes:
-            if width is not None and "width" in inputs:
-                workflow[node_id]["inputs"]["width"] = width
-            if height is not None and "height" in inputs:
-                workflow[node_id]["inputs"]["height"] = height
-            # For WAN image generation, use 1 frame
-            if "num_frames" in inputs:
-                workflow[node_id]["inputs"]["num_frames"] = 1
-            # Wan22ImageToVideoLatent uses 'length' instead of 'num_frames'
-            if "length" in inputs:
-                workflow[node_id]["inputs"]["length"] = 1
-
-    return workflow
-
-
-def update_controlnet_strength(workflow: dict, strength: float) -> dict:
-    """Update ControlNet strength in workflow."""
-    controlnet_classes = [
-        "ControlNetApplyAdvanced",
-        "ControlNetApply",
-        "ControlNetApplySD3",
-    ]
-
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-
-        if class_type in controlnet_classes:
-            if "strength" in inputs:
-                workflow[node_id]["inputs"]["strength"] = strength
 
     return workflow
 
@@ -180,32 +137,28 @@ def generate_image(
     width: int = 832,
     height: int = 480,
     seed: int = 0,
-    steps: int = 28,
-    cfg: float = 4.5,
+    steps: int = 20,
+    cfg: float = 3.5,
     resolution_preset: str = None,
     workflow_path: str | None = None,
     timeout: int = 300,
-    mode: str | None = None,
-    controlnet_strength: float = 0.7,
 ) -> str:
     """
-    Generate a keyframe image using Stable Diffusion 3.5 Large via ComfyUI.
+    Generate a keyframe image using Qwen Image Edit 2509 via ComfyUI.
 
     Args:
         prompt: Text prompt describing the image
         output_path: Path to save the generated image
         style_ref: Optional path to style configuration JSON
-        reference_image: Optional reference image for IP-Adapter consistency
+        reference_image: Optional reference image for editing/consistency
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
-        steps: Number of sampling steps (28 for SD 3.5)
-        cfg: Classifier-free guidance scale (4.5 for SD 3.5)
+        steps: Number of sampling steps
+        cfg: Classifier-free guidance scale
         resolution_preset: Resolution preset ("low", "medium", "high")
         workflow_path: Optional custom workflow path
         timeout: Maximum time to wait for generation
-        mode: Generation mode - "action" (IP-Adapter only) or "static" (Depth + IP-Adapter)
-        controlnet_strength: ControlNet strength for static mode (0.0-1.0, default 0.7)
 
     Returns:
         Path to saved image
@@ -237,45 +190,23 @@ def generate_image(
     # Build enhanced prompt
     enhanced_prompt = build_enhanced_prompt(prompt, style_config)
 
-    # Determine workflow based on inputs and mode
+    # Determine workflow based on inputs
     if workflow_path:
         wf_path = Path(workflow_path)
         print_status("Using custom workflow")
     elif reference_image:
-        # Mode-based workflow selection for consistency
-        if mode == "action":
-            # Action mode: IP-Adapter only - allows pose/position changes
-            if IPADAPTER_WORKFLOW.exists():
-                wf_path = IPADAPTER_WORKFLOW
-                print_status("Using IP-Adapter workflow (action mode - free movement)")
-            else:
-                print_status("IP-Adapter workflow not found!", "error")
-                sys.exit(1)
-        elif mode == "static":
-            # Static mode: Depth + IP-Adapter - maintains spatial layout
-            if DEPTH_IPADAPTER_WORKFLOW.exists():
-                wf_path = DEPTH_IPADAPTER_WORKFLOW
-                print_status(f"Using Depth+IP-Adapter workflow (static mode - strength {controlnet_strength})")
-            else:
-                print_status("Depth+IP-Adapter workflow not found, falling back to IP-Adapter only", "warning")
-                wf_path = IPADAPTER_WORKFLOW
+        if EDIT_WORKFLOW.exists():
+            wf_path = EDIT_WORKFLOW
+            print_status("Using Qwen Image Edit workflow (consistency/editing)")
         else:
-            # No mode specified - default to Depth+IP-Adapter if available (backwards compatible)
-            if DEPTH_IPADAPTER_WORKFLOW.exists():
-                wf_path = DEPTH_IPADAPTER_WORKFLOW
-                print_status(f"Using Depth+IP-Adapter workflow (default - strength {controlnet_strength})")
-            elif IPADAPTER_WORKFLOW.exists():
-                wf_path = IPADAPTER_WORKFLOW
-                print_status("Using IP-Adapter workflow (character consistency only)")
-            else:
-                print_status("No consistency workflow found!", "error")
-                sys.exit(1)
+            print_status("Edit workflow not found!", "error")
+            sys.exit(1)
     elif T2I_WORKFLOW.exists():
         wf_path = T2I_WORKFLOW
-        print_status("Using SD 3.5 T2I workflow")
+        print_status("Using Qwen T2I workflow")
     else:
-        print_status("SD 3.5 workflow not found!", "error")
-        print_status("Please ensure SD 3.5 workflows are set up correctly.", "error")
+        print_status("Qwen workflows not found!", "error")
+        print_status("Please ensure Qwen workflows are set up correctly.", "error")
         sys.exit(1)
 
     print_status(f"Generating image with prompt: {enhanced_prompt[:100]}...")
@@ -284,7 +215,6 @@ def generate_image(
     # Load workflow
     if not wf_path.exists():
         print_status(f"Workflow not found: {wf_path}", "error")
-        print_status("Please ensure WAN workflows are set up correctly.", "error")
         sys.exit(1)
 
     try:
@@ -321,9 +251,6 @@ def generate_image(
         cfg=cfg,
         seed=seed,
     )
-    # Update ControlNet strength if using static mode
-    if mode == "static" or (mode is None and wf_path == DEPTH_IPADAPTER_WORKFLOW):
-        workflow = update_controlnet_strength(workflow, controlnet_strength)
 
     # Execute workflow
     print_status("Submitting to ComfyUI...", "progress")
@@ -343,14 +270,6 @@ def generate_image(
 
         # Get output images
         images = client.get_output_images(result)
-
-        # Also check for video outputs (if workflow outputs as video)
-        if not images:
-            videos = client.get_output_videos(result)
-            if videos:
-                # Extract first frame from video output
-                print_status("Output is video format, saving first frame", "warning")
-                images = videos  # Use same download logic
 
         if not images:
             print_status("No images generated!", "error")
@@ -384,7 +303,7 @@ def generate_image(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate keyframe images using Stable Diffusion 3.5 Large via ComfyUI"
+        description="Generate keyframe images using Qwen Image Edit 2509 via ComfyUI"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -403,7 +322,7 @@ def main():
     parser.add_argument(
         "--reference", "-r",
         dest="reference_image",
-        help="Reference image path for IP-Adapter character consistency"
+        help="Reference image path for Editing/Consistency"
     )
     parser.add_argument(
         "--width", "-W",
@@ -432,14 +351,14 @@ def main():
     parser.add_argument(
         "--steps",
         type=int,
-        default=28,
-        help="Number of sampling steps (default: 28 for SD 3.5)"
+        default=20,
+        help="Number of sampling steps (default: 20)"
     )
     parser.add_argument(
         "--cfg",
         type=float,
-        default=4.5,
-        help="CFG scale (default: 4.5 for SD 3.5)"
+        default=3.5,
+        help="CFG scale (default: 3.5)"
     )
     parser.add_argument(
         "--workflow",
@@ -450,17 +369,6 @@ def main():
         type=int,
         default=300,
         help="Maximum time to wait in seconds (default: 300)"
-    )
-    parser.add_argument(
-        "--mode", "-m",
-        choices=["action", "static"],
-        help="Generation mode: 'action' (IP-Adapter only, free movement) or 'static' (Depth+IP-Adapter, locked positions)"
-    )
-    parser.add_argument(
-        "--controlnet-strength",
-        type=float,
-        default=0.7,
-        help="ControlNet strength for static mode (0.0-1.0, default: 0.7). Lower values allow more position variation."
     )
 
     args = parser.parse_args()
@@ -478,8 +386,6 @@ def main():
         resolution_preset=args.preset,
         workflow_path=args.workflow,
         timeout=args.timeout,
-        mode=args.mode,
-        controlnet_strength=args.controlnet_strength,
     )
 
 

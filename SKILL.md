@@ -1,7 +1,7 @@
 ---
 name: ai-video-producer
 description: >
-  Complete AI video production workflow using WAN 2.2 and SD 3.5 models via ComfyUI.
+  Complete AI video production workflow using WAN 2.2 and Qwen Image Edit 2509 models via ComfyUI.
   Creates any video type: promotional, educational, narrative, social media,
   animations, game trailers, music videos, product demos, and more. Use when
   users want to create videos with AI, need help with video storyboarding,
@@ -17,14 +17,14 @@ Create professional AI-generated videos through a structured, iterative workflow
 
 ## Prerequisites & Auto-Setup
 
-**This skill requires ComfyUI with WAN 2.2 models. The setup script handles everything automatically.**
+**This skill requires ComfyUI with WAN 2.2 and Qwen Image Edit 2509 models. The setup script handles everything automatically.**
 
 ### First-Time Setup (Automatic)
 
 If ComfyUI is not detected, run the auto-setup script:
 
 ```bash
-# Full automatic setup (~33GB download)
+# Full automatic setup (~40GB download)
 python {baseDir}/scripts/setup_comfyui.py
 
 # Check setup status
@@ -36,11 +36,10 @@ python {baseDir}/scripts/setup_comfyui.py --start
 
 The setup script will:
 1. Clone and configure ComfyUI
-2. Install required custom nodes (ComfyUI-GGUF, VideoHelperSuite, ComfyUI-Manager)
+2. Install required custom nodes (ComfyUI-GGUF, ComfyUI_RH_Qwen-Image, etc.)
 3. Download WAN 2.2 GGUF model (Q4_K_M for 10GB VRAM)
-4. Download UMT5-XXL text encoder
-5. Download LightX2V distillation LoRA (enables fast 8-step generation)
-6. Install all Python dependencies
+4. Download Qwen Image Edit 2509 models (FP8)
+5. Install all Python dependencies
 
 ### Before Each Session
 
@@ -57,7 +56,7 @@ No manual intervention required - just start your video project conversation.
 |-----------|---------|-------------|
 | GPU VRAM | 10GB | 12GB+ |
 | RAM | 16GB | 32GB |
-| Storage | 30GB free | 50GB+ |
+| Storage | 40GB free | 60GB+ |
 | OS | Windows/Linux/macOS | Ubuntu 22.04+ |
 
 **See `SETUP.md` for detailed manual installation instructions.**
@@ -270,16 +269,16 @@ If user requests changes → make adjustments → ask again → repeat until app
 
 **YOU MUST follow these rules to maintain character/background consistency:**
 
-1. **First keyframe of Scene 1**: No reference needed (establishes the visual style)
-2. **All subsequent keyframes**: MUST use `--reference` flag with previous keyframe(s)
-3. **End keyframe**: ALWAYS reference the start keyframe of the same scene
-4. **Next scene's start keyframe**: ALWAYS reference the previous scene's end keyframe (or start if no end)
+1. **First keyframe of Scene 1**: No reference needed (T2I mode - establishes the visual style).
+2. **All subsequent keyframes**: MUST use `--reference` flag with previous keyframe(s) (Qwen Edit mode).
+3. **End keyframe**: ALWAYS reference the start keyframe of the same scene.
+4. **Next scene's start keyframe**: ALWAYS reference the previous scene's end keyframe (or start if no end).
 
 **Reference Chain Example:**
 ```
-Scene 1 start → (reference for) → Scene 1 end
-Scene 1 end   → (reference for) → Scene 2 start
-Scene 2 start → (reference for) → Scene 2 end
+Scene 1 start (T2I) → (reference for) → Scene 1 end (Edit)
+Scene 1 end         → (reference for) → Scene 2 start (Edit)
+Scene 2 start       → (reference for) → Scene 2 end (Edit)
 ... and so on
 ```
 
@@ -291,50 +290,12 @@ mkdir -p {output_dir}/scene-02
 # ... for each scene
 ```
 
-### Step 3.2: Choose Workflow Based on Scene Type
+### Step 3.2: Generate Keyframes Per Scene
 
-**CRITICAL: Different scene types require different consistency approaches.**
-
-| Scene Type | Examples | Workflow | Why |
-|------------|----------|----------|-----|
-| **Action/Dynamic** | Fighting, running, dancing, sports | IP-Adapter only | Allows pose/position changes |
-| **Static/Slow** | Talking, standing, slow camera moves | Depth + IP-Adapter | Maintains exact spatial layout |
-| **Camera Movement** | Pan, zoom, dolly (same subject) | Depth + IP-Adapter | Keeps subject position locked |
-
-**The `--mode` flag automatically selects the right workflow:**
-
-```bash
-# Action scenes - use "action" mode (IP-Adapter only)
-python {baseDir}/scripts/sd35_image.py \
-  --prompt "..." --reference ... --mode action --output ...
-
-# Static scenes - use "static" mode (Depth + IP-Adapter)
-python {baseDir}/scripts/sd35_image.py \
-  --prompt "..." --reference ... --mode static --output ...
-```
-
-**Fine-tune ControlNet strength for static scenes:**
-
-```bash
-# Default strength (0.7) - strong spatial lock
-python {baseDir}/scripts/sd35_image.py \
-  --prompt "..." --reference ... --mode static --output ...
-
-# Lower strength (0.3-0.5) - allows some position shift
-python {baseDir}/scripts/sd35_image.py \
-  --prompt "..." --reference ... --mode static --controlnet-strength 0.4 --output ...
-
-# Very low strength (0.1-0.2) - subtle spatial guidance only
-python {baseDir}/scripts/sd35_image.py \
-  --prompt "..." --reference ... --mode static --controlnet-strength 0.2 --output ...
-```
-
-### Step 3.3: Generate Keyframes Per Scene
-
-**Scene 1 - First keyframe (no reference needed):**
+**Scene 1 - First keyframe (T2I - no reference):**
 ```bash
 # Scene 1: Start keyframe - establishes visual style
-python {baseDir}/scripts/sd35_image.py \
+python {baseDir}/scripts/qwen_image.py \
   --prompt "[Detailed prompt from scene-breakdown.md]" \
   --style-ref {output_dir}/style.json \
   --output {output_dir}/scene-01/keyframe-start.png
@@ -342,41 +303,20 @@ python {baseDir}/scripts/sd35_image.py \
 
 **Scene 1 - End keyframe (MUST reference start):**
 ```bash
-# Scene 1: End keyframe - choose mode based on scene type
-# For ACTION scenes (fighting, sports, dynamic movement):
-python {baseDir}/scripts/sd35_image.py \
+# Scene 1: End keyframe - Uses Qwen Edit to modify the start frame
+python {baseDir}/scripts/qwen_image.py \
   --prompt "[Detailed prompt - dramatic new pose/action]" \
   --style-ref {output_dir}/style.json \
   --reference {output_dir}/scene-01/keyframe-start.png \
-  --mode action \
-  --output {output_dir}/scene-01/keyframe-end.png
-
-# For STATIC scenes (talking, slow movement, camera-only motion):
-python {baseDir}/scripts/sd35_image.py \
-  --prompt "[Detailed prompt - same position, different expression/detail]" \
-  --style-ref {output_dir}/style.json \
-  --reference {output_dir}/scene-01/keyframe-start.png \
-  --mode static \
   --output {output_dir}/scene-01/keyframe-end.png
 ```
 
 **Scene 2+ - Start keyframe (MUST reference previous scene):**
 ```bash
 # Scene 2: Start keyframe - MUST reference Scene 1's end keyframe
-python {baseDir}/scripts/sd35_image.py \
+python {baseDir}/scripts/qwen_image.py \
   --prompt "[Detailed prompt for scene 2 start]" \
   --style-ref {output_dir}/style.json \
-  --reference {output_dir}/scene-01/keyframe-end.png \
-  --output {output_dir}/scene-02/keyframe-start.png
-```
-
-**Multiple references for complex consistency:**
-```bash
-# You can pass multiple --reference flags for better consistency
-python {baseDir}/scripts/sd35_image.py \
-  --prompt "[Detailed prompt]" \
-  --style-ref {output_dir}/style.json \
-  --reference {output_dir}/scene-01/keyframe-start.png \
   --reference {output_dir}/scene-01/keyframe-end.png \
   --output {output_dir}/scene-02/keyframe-start.png
 ```
@@ -548,25 +488,16 @@ If ComfyUI is not running, start it in the background before proceeding.
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `sd35_image.py` | Generate keyframes (SD 3.5 + IP-Adapter) | `--prompt`, `--output`, `--style-ref`, `--reference`, `--mode`, `--controlnet-strength` |
+| `qwen_image.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--style-ref`, `--reference` |
 | `wan_video.py` | Generate videos (WAN 2.2) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
 | `comfyui_client.py` | Test ComfyUI connection | (run directly to test) |
 
 ### Keyframe Generation Modes
 
-| Mode | Workflow Used | Best For | Spatial Lock |
-|------|---------------|----------|--------------|
-| `action` | IP-Adapter only | Fighting, sports, dancing, running | None - free movement |
-| `static` | Depth + IP-Adapter | Talking, standing, camera moves | Strong - same positions |
-
-### ControlNet Strength Guide (static mode only)
-
-| Strength | Effect | Use Case |
-|----------|--------|----------|
-| `0.7-1.0` | Strong lock | Subject must stay in exact position |
-| `0.4-0.6` | Moderate | Allow slight position shift |
-| `0.2-0.3` | Light | Subtle guidance, more creative freedom |
-| `0.0-0.1` | Minimal | Almost no spatial constraint |
+| Mode | Command | Description |
+|------|---------|-------------|
+| **T2I** | `qwen_image.py ...` (no ref) | Create initial image from scratch. |
+| **Edit** | `qwen_image.py ... --reference ...` | Edit existing image (pose, expression) while maintaining consistency. |
 
 ### Video Generation Modes
 
@@ -582,10 +513,8 @@ If ComfyUI is not running, start it in the background before proceeding.
 | Video Duration | ~5 seconds (81 frames) |
 | Frame Rate | 16 fps |
 | Resolution | Up to 832x480 (medium preset) |
-| VRAM Required | 10GB (GGUF Q4_K_M quantization) |
-| Steps | 8 (with LightX2V LoRA) |
-| CFG | 1.0 (guidance baked into LoRA) |
-| LoRA Strength | 1.25 (for I2V mode) |
+| VRAM Required | 10GB (WAN Q4_K_M + Qwen FP8) |
+| Steps | 20 (Qwen), 8 (WAN) |
 
 ### Models Required
 
@@ -597,22 +526,12 @@ If ComfyUI is not running, start it in the background before proceeding.
 | wan_2.1_vae.safetensors | 0.2GB | WAN VAE |
 | Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors | 0.7GB | Fast generation LoRA |
 
-**Keyframe Generation (SD 3.5 Large):**
+**Keyframe Generation (Qwen Image Edit 2509):**
 | Model | Size | Purpose |
 |-------|------|---------|
-| sd3.5_large-Q4_K_S.gguf | 4.8GB | SD 3.5 Large (GGUF quantized) |
-| clip_g.safetensors | 1.4GB | CLIP-G text encoder |
-| clip_l.safetensors | 0.2GB | CLIP-L text encoder |
-| t5xxl_fp8_e4m3fn.safetensors | 4.9GB | T5-XXL text encoder |
-| sd3.5_vae.safetensors | 0.2GB | SD 3.5 VAE |
-
-**Consistency Tools (ControlNet + IP-Adapter):**
-| Model | Size | Purpose |
-|-------|------|---------|
-| sd3.5_large_controlnet_canny.safetensors | 2.5GB | Edge-based control |
-| sd3.5_large_controlnet_depth.safetensors | 2.5GB | Depth-based control |
-| ip-adapter-sd3.bin | 1.0GB | Character consistency |
-| siglip_vision_patch14_384.safetensors | 0.9GB | IP-Adapter vision encoder |
+| qwen_image_fp8_e4m3fn.safetensors | 12.0GB | Main Image Model (FP8) |
+| qwen_2.5_vl_7b_fp8_scaled.safetensors | 7.5GB | Vision-Language Text Encoder |
+| qwen_image_vae.safetensors | 0.2GB | Qwen VAE |
 
 See `SETUP.md` for installation instructions.
 See `references/prompt-engineering.md` for detailed prompt writing guidance.
