@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Auto-setup script for ComfyUI with WAN 2.2 video generation and SD 3.5 keyframe generation.
+Auto-setup script for ComfyUI with WAN 2.2 video generation and Qwen Image Edit 2511 keyframe generation.
 Downloads and configures everything needed to run the AI video skill.
 
-Uses SD 3.5 Large (GGUF quantized) for keyframe generation with ControlNet and IP-Adapter
-for character consistency across frames.
+Uses Qwen Image Edit 2511 (FP8 mixed precision) for keyframe generation with enhanced
+consistency for character/scene preservation across frames.
 
 Usage:
     python setup_comfyui.py              # Full setup
@@ -65,25 +65,32 @@ MODELS = {
         "required": True,
     },
     # ===========================================
-    # Qwen Image Edit Models (Keyframe/Image Generation)
+    # Qwen Image Edit 2511 Models (Keyframe/Image Generation)
+    # Best open-source image editing model with enhanced consistency
     # ===========================================
-    # Qwen Image Main Model (FP8)
-    "checkpoints/qwen_image_fp8_e4m3fn.safetensors": {
-        "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors",
-        "size_gb": 12.0, # Estimated
+    # Qwen Image Edit 2511 Main Model (FP8 mixed precision - better quality than pure FP8)
+    "diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+        "size_gb": 20.5,
         "required": True,
     },
-    # Qwen Text Encoder (VL 7B)
+    # Qwen Text Encoder (VL 7B) - shared with video generation
     "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors": {
         "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
-        "size_gb": 7.5, # Estimated
+        "size_gb": 7.5,
         "required": True,
     },
     # Qwen VAE
     "vae/qwen_image_vae.safetensors": {
         "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
-        "size_gb": 0.2, # Estimated
+        "size_gb": 0.2,
         "required": True,
+    },
+    # Qwen Image Edit 2511 Lightning LoRA (enables 4-step fast generation)
+    "loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors": {
+        "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "size_gb": 0.7,
+        "required": False,  # Optional for fast generation
     },
 }
 
@@ -369,7 +376,7 @@ def start_comfyui(comfyui_dir: Path, port: int = 8188):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Setup ComfyUI for AI video production (SD 3.5 keyframes + WAN 2.2 video)"
+        description="Setup ComfyUI for AI video production (Qwen Image Edit 2511 keyframes + WAN 2.2 video)"
     )
     parser.add_argument(
         "--check",
@@ -404,7 +411,7 @@ def main():
 
     print("\n" + "="*50)
     print("AI Video Producer Setup")
-    print("(SD 3.5 for keyframes + WAN 2.2 for video)")
+    print("(Qwen Image Edit 2511 for keyframes + WAN 2.2 for video)")
     print("="*50 + "\n")
 
     # Check only

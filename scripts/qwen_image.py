@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate keyframe images using Qwen Image Edit 2509 via ComfyUI.
+Generate keyframe images using Qwen Image Edit 2511 via ComfyUI.
 Used for creating keyframes in the AI video production workflow.
-Qwen Image Edit provides high-quality images and text-driven editing
-for character consistency.
+Qwen Image Edit 2511 provides the best open-source image editing with
+enhanced character/scene consistency across frames.
 """
 
 import argparse
@@ -68,7 +68,10 @@ def update_workflow_prompts(workflow: dict, prompt: str, negative_prompt: str = 
 
 
 def update_workflow_images(workflow: dict, reference_image: str = None) -> dict:
-    """Update image inputs in workflow for Editing mode."""
+    """Update image inputs in workflow for Editing mode.
+
+    Handles both LoadImage nodes and TextEncodeQwenImageEditPlus image inputs.
+    """
     if not reference_image:
         return workflow
 
@@ -80,6 +83,7 @@ def update_workflow_images(workflow: dict, reference_image: str = None) -> dict:
         inputs = node.get("inputs", {})
         title = node.get("_meta", {}).get("title", "").lower()
 
+        # Update LoadImage nodes
         if class_type == "LoadImage":
             current_image = str(inputs.get("image", ""))
             # Update reference/input image
@@ -138,13 +142,13 @@ def generate_image(
     height: int = 480,
     seed: int = 0,
     steps: int = 20,
-    cfg: float = 3.5,
+    cfg: float = 4.0,
     resolution_preset: str = None,
     workflow_path: str | None = None,
     timeout: int = 300,
 ) -> str:
     """
-    Generate a keyframe image using Qwen Image Edit 2509 via ComfyUI.
+    Generate a keyframe image using Qwen Image Edit 2511 via ComfyUI.
 
     Args:
         prompt: Text prompt describing the image
@@ -197,13 +201,13 @@ def generate_image(
     elif reference_image:
         if EDIT_WORKFLOW.exists():
             wf_path = EDIT_WORKFLOW
-            print_status("Using Qwen Image Edit workflow (consistency/editing)")
+            print_status("Using Qwen Image Edit 2511 workflow (consistency/editing)")
         else:
             print_status("Edit workflow not found!", "error")
             sys.exit(1)
     elif T2I_WORKFLOW.exists():
         wf_path = T2I_WORKFLOW
-        print_status("Using Qwen T2I workflow")
+        print_status("Using Qwen Image Edit 2511 T2I workflow")
     else:
         print_status("Qwen workflows not found!", "error")
         print_status("Please ensure Qwen workflows are set up correctly.", "error")
@@ -303,7 +307,7 @@ def generate_image(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate keyframe images using Qwen Image Edit 2509 via ComfyUI"
+        description="Generate keyframe images using Qwen Image Edit 2511 via ComfyUI"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -357,8 +361,8 @@ def main():
     parser.add_argument(
         "--cfg",
         type=float,
-        default=3.5,
-        help="CFG scale (default: 3.5)"
+        default=4.0,
+        help="CFG scale (default: 4.0)"
     )
     parser.add_argument(
         "--workflow",
