@@ -203,32 +203,39 @@ Before creating scenes, determine:
 ## Overview
 - **Total Duration**: [X seconds]
 - **Number of Scenes**: [N]
+- **Number of Unique Keyframes**: [M] (adjacent scenes share boundary keyframes)
 - **Video Type**: [promotional/narrative/educational/etc.]
 
 ---
 
-## Scene 1: [Title]
+## Unique Keyframes
+
+Define all unique keyframes first. **Adjacent scenes share their boundary keyframe for perfect continuity.**
+
+| ID | Description | Pose Asset | Character | Background | Used In |
+|----|-------------|------------|-----------|------------|---------|
+| KF-A | [Description of this moment] | [pose].png | [character] | [background] | Scene 1 start |
+| KF-B | [Description of this moment] | [pose].png | [character] | [background] | Scene 1 end, Scene 2 start |
+| KF-C | [Description of this moment] | [pose].png | [character] | [background] | Scene 2 end |
+
+**Important:** Keyframes marked with multiple scenes (e.g., "Scene 1 end, Scene 2 start") are SHARED.
+Generate once in \ folder, use for both scenes. This ensures perfect video continuity.
+
+---
+
+## Scenes
+
+### Scene 1: [Title]
 
 **Type**: character | landscape
 **Duration**: [X seconds] (max 5 seconds per scene)
 **Purpose**: [What this scene communicates]
 
-**Characters**: [asset name from assets.json, e.g., "samurai"] (only for type: character)
-**Background**: [asset name from assets.json, e.g., "temple_courtyard"]
-**Style**: [asset name from assets.json, e.g., "ghibli"]
-
-**Start Frame**:
-- pose: [asset name from assets.json, e.g., "standing"]
-- expression: [description]
-- additional details: [any other specific details]
-
-**End Frame**:
-- pose: [asset name from assets.json, e.g., "meditation"]
-- expression: [description]
-- additional details: [any other specific details]
+**Start Keyframe**: KF-A
+**End Keyframe**: KF-B
 
 **Motion Description**:
-[Specific actions and movements that occur]
+[Specific actions and movements that occur between start and end keyframes]
 
 **Camera**: [static/tracking/pan/zoom - be specific]
 
@@ -236,22 +243,34 @@ Before creating scenes, determine:
 
 ---
 
-## Scene 2: [Title]
+### Scene 2: [Title]
 
-[Same format as Scene 1]
+**Type**: character | landscape
+**Duration**: [X seconds]
+**Purpose**: [What this scene communicates]
+
+**Start Keyframe**: KF-B (shared from Scene 1 end - do NOT regenerate)
+**End Keyframe**: KF-C
+
+**Motion Description**:
+[Specific actions and movements that occur between start and end keyframes]
+
+**Camera**: [static/tracking/pan/zoom - be specific]
+
+**Transition to Next**: [cut/fade/continuous]
 
 ---
 
-[Continue for all scenes...]
+[Continue for all scenes - remember adjacent scenes share boundary keyframes]
 
 ---
 
 ## Generation Strategy
 
-| Scene | Type | Mode | Keyframes | Notes |
-|-------|------|------|-----------|-------|
-| 1 | character | composite | 2 | Uses layers/ for background + character |
-| 2 | landscape | single | 2 | Background only, no character layer |
+| Scene | Start KF | End KF | Type | Notes |
+|-------|----------|--------|------|-------|
+| 1 | KF-A | KF-B | character | Generate KF-A and KF-B |
+| 2 | KF-B | KF-C | character | Reuse KF-B (shared), generate KF-C only |
 ```
 
 **Scene Type Explanation:**
@@ -388,7 +407,25 @@ If user requests changes → regenerate specific assets → ask again → repeat
 
 ## Phase 3: Keyframe Generation
 
-**FOR EACH SCENE, generate keyframes before moving to the next scene.**
+**Generate UNIQUE keyframes only. Adjacent scenes share boundary keyframes for perfect continuity.**
+
+### Keyframe Generation Principle
+
+Instead of generating keyframes per-scene (which causes discontinuity), generate all unique keyframes first:
+
+```
+UNIQUE KEYFRAMES:              SCENES USE THEM:
+┌─────────────────┐        
+│ KF-A            │──────────→ Scene 1: KF-A → KF-B
+├─────────────────┤                       ↓
+│ KF-B (shared)   │──────────→ Scene 2: KF-B → KF-C
+├─────────────────┤                       
+│ KF-C            │
+└─────────────────┘
+
+Result: 3 keyframes for 2 scenes (not 4)
+        Perfect continuity at scene boundaries
+```
 
 ### Generation Flow by Scene Type
 
@@ -410,11 +447,15 @@ Keyframe generation uses different flows based on scene type from `scene-breakdo
 | **Background** | Chain from previous scene's background for continuity |
 | **Style** | ALWAYS apply with style asset reference |
 
-### Step 3.1: Set Up Scene Directories
+### Step 3.1: Set Up Directory Structure
 
 ```bash
-mkdir -p {output_dir}/scene-01/layers
-mkdir -p {output_dir}/scene-02/layers
+# Create centralized keyframes folder
+mkdir -p {output_dir}/keyframes
+
+# Create scene folders (for videos only)
+mkdir -p {output_dir}/scene-01
+mkdir -p {output_dir}/scene-02
 # ... for each scene
 ```
 
@@ -612,10 +653,10 @@ If user requests changes:
 {output_dir}/
 ├── philosophy.md              # REQUIRED - Production philosophy
 ├── style.json                 # REQUIRED - Style configuration
-├── scene-breakdown.md         # REQUIRED - Full scene breakdown
+├── scene-breakdown.md         # REQUIRED - Full scene breakdown with unique keyframes
 ├── assets.json                # REQUIRED - Asset definitions
 │
-├── assets/                    # Reusable assets
+├── assets/                    # Reusable generation assets
 │   ├── characters/
 │   │   ├── samurai.png
 │   │   └── ninja.png
@@ -631,23 +672,22 @@ If user requests changes:
 │   └── objects/
 │       └── katana.png
 │
+├── keyframes/                 # CENTRALIZED unique keyframes
+│   ├── KF-A.png              # Scene 1 start
+│   ├── KF-B.png              # Scene 1 end = Scene 2 start (SHARED)
+│   └── KF-C.png              # Scene 2 end
+│
 ├── scene-01/
-│   ├── layers/                # Intermediate layers (character scenes)
-│   │   ├── background.png
-│   │   └── character.png
-│   ├── keyframe-start.png     # Final composite
-│   ├── keyframe-end.png
-│   └── video.mp4
+│   └── video.mp4             # Video only - keyframes in /keyframes/
 │
 ├── scene-02/
-│   ├── layers/
-│   │   └── background.png     # Landscape - no character layer
-│   ├── keyframe-start.png
-│   ├── keyframe-end.png
 │   └── video.mp4
 │
 └── [additional scenes...]
 ```
+
+**Note:** Keyframes are stored centrally in `keyframes/` folder, not per-scene.
+Adjacent scenes share boundary keyframes (e.g., KF-B is used by both Scene 1 and Scene 2).
 
 ---
 
@@ -660,18 +700,21 @@ At the START of the workflow, create this todo list:
 2. Create philosophy.md
 3. Create style.json
 4. Get user approval on production philosophy
-5. Create scene-breakdown.md
+5. Create scene-breakdown.md with unique keyframes table
 6. Get user approval on scene breakdown
-7. Analyze required assets from scene breakdown
-8. Create assets.json
-9. Generate asset images (characters, backgrounds, poses, styles)
-10. Get user approval on assets
-11. Generate Scene 1 keyframes (layers → composite)
-12. Get user approval on Scene 1 keyframes
-13. Generate Scene 1 video
-14. [Repeat 11-13 for each scene]
+7. Create assets.json
+8. Generate asset images (characters, backgrounds, poses, styles)
+9. Get user approval on assets
+10. Generate ALL unique keyframes (KF-A, KF-B, KF-C, etc.)
+11. Get user approval on keyframes
+12. Generate Scene 1 video (using KF-A → KF-B)
+13. Generate Scene 2 video (using KF-B → KF-C, KF-B is shared)
+14. [Continue for additional scenes]
 15. Provide final summary to user
 ```
+
+**Key difference:** Generate ALL unique keyframes first (step 10), then generate videos (steps 12+).
+Shared keyframes are generated once and reused across scene boundaries.
 
 ### Auto-Setup Check (Step 1)
 
