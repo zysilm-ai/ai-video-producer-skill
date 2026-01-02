@@ -128,6 +128,7 @@ def update_workflow_params(
     steps: int = None,
     cfg: float = None,
     seed: int = None,
+    shift: float = None,
 ) -> dict:
     """Update generation parameters in workflow."""
 
@@ -173,6 +174,11 @@ def update_workflow_params(
             if height is not None and "height" in inputs:
                 workflow[node_id]["inputs"]["height"] = height
 
+        # Update ModelSamplingAuraFlow shift parameter (for flow matching models)
+        if class_type == "ModelSamplingAuraFlow":
+            if shift is not None and "shift" in inputs:
+                workflow[node_id]["inputs"]["shift"] = shift
+
     return workflow
 
 
@@ -187,7 +193,8 @@ def generate_image(
     height: int = 480,
     seed: int = 0,
     steps: int = 20,
-    cfg: float = 4.0,
+    cfg: float = 1.0,
+    shift: float = 5.0,
     resolution_preset: str = None,
     workflow_path: str | None = None,
     timeout: int = 300,
@@ -206,7 +213,8 @@ def generate_image(
         height: Image height
         seed: Random seed (0 for random)
         steps: Number of sampling steps
-        cfg: Classifier-free guidance scale
+        cfg: Classifier-free guidance scale (default 1.0 for flow matching)
+        shift: ModelSamplingAuraFlow shift parameter (default 5.0, range 3.0-8.0)
         resolution_preset: Resolution preset ("low", "medium", "high")
         workflow_path: Optional custom workflow path
         timeout: Maximum time to wait for generation
@@ -270,7 +278,7 @@ def generate_image(
         sys.exit(1)
 
     print_status(f"Generating image with prompt: {enhanced_prompt[:100]}...")
-    print_status(f"Resolution: {width}x{height}, Steps: {steps}, CFG: {cfg}")
+    print_status(f"Resolution: {width}x{height}, Steps: {steps}, CFG: {cfg}, Shift: {shift}")
 
     # Load workflow
     if not wf_path.exists():
@@ -328,6 +336,7 @@ def generate_image(
         steps=steps,
         cfg=cfg,
         seed=seed,
+        shift=shift,
     )
 
     # Execute workflow
@@ -446,8 +455,14 @@ def main():
     parser.add_argument(
         "--cfg",
         type=float,
-        default=4.0,
-        help="CFG scale (default: 4.0)"
+        default=1.0,
+        help="CFG scale (default: 1.0 for flow matching models)"
+    )
+    parser.add_argument(
+        "--shift",
+        type=float,
+        default=5.0,
+        help="ModelSamplingAuraFlow shift (default: 5.0, range 3.0-8.0)"
     )
     parser.add_argument(
         "--workflow",
@@ -456,8 +471,8 @@ def main():
     parser.add_argument(
         "--timeout",
         type=int,
-        default=300,
-        help="Maximum time to wait in seconds (default: 300)"
+        default=600,
+        help="Maximum time to wait in seconds (default: 600)"
     )
 
     args = parser.parse_args()
@@ -474,6 +489,7 @@ def main():
         seed=args.seed,
         steps=args.steps,
         cfg=args.cfg,
+        shift=args.shift,
         resolution_preset=args.preset,
         workflow_path=args.workflow,
         timeout=args.timeout,

@@ -280,6 +280,44 @@ class ComfyUIClient:
         response.raise_for_status()
         return response.json()
 
+    def get_queue(self) -> dict:
+        """
+        Get current queue status.
+
+        Returns:
+            Dict with 'queue_running' and 'queue_pending' lists
+        """
+        response = requests.get(
+            f"{self.base_url}/queue",
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def is_prompt_in_queue(self, prompt_id: str) -> bool:
+        """
+        Check if a prompt is still in the queue (running or pending).
+
+        Args:
+            prompt_id: The prompt ID to check
+
+        Returns:
+            True if prompt is in queue, False if completed or not found
+        """
+        try:
+            queue = self.get_queue()
+            # Check running queue - format: [[priority, prompt_id, workflow, extra, outputs], ...]
+            for item in queue.get("queue_running", []):
+                if len(item) > 1 and item[1] == prompt_id:
+                    return True
+            # Check pending queue
+            for item in queue.get("queue_pending", []):
+                if len(item) > 1 and item[1] == prompt_id:
+                    return True
+            return False
+        except Exception:
+            return False
+
     def get_image(
         self,
         filename: str,
@@ -372,30 +410,46 @@ class ComfyUIClient:
                             raise ComfyUIError(f"Execution error:\n{error_msg}")
 
                 except websocket.WebSocketTimeoutException:
-                    # Check if already completed via history
-                    history = self.get_history(prompt_id)
-                    if prompt_id in history:
-                        break
+                    # Check if job completed - first check queue, then history
+                    if not self.is_prompt_in_queue(prompt_id):
+                        # Job not in queue - check history for results
+                        history = self.get_history(prompt_id)
+                        if prompt_id in history:
+                            break
+                        # If not in queue AND not in history, wait a bit for history to populate
+                        time.sleep(1)
+                        history = self.get_history(prompt_id)
+                        if prompt_id in history:
+                            break
 
             ws.close()
 
+        except TimeoutError:
+            # Re-raise timeout errors - don't fall back to polling
+            raise
         except (websocket.WebSocketException, OSError) as e:
-            # Fallback to polling if WebSocket fails
+            # Fallback to polling if WebSocket fails (but not for timeouts)
             print_status(f"WebSocket error, falling back to polling: {e}", "warning")
             while True:
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
                     raise TimeoutError(f"Workflow timed out after {timeout}s")
 
-                history = self.get_history(prompt_id)
-                if prompt_id in history:
-                    # Check for execution errors
-                    status = history[prompt_id].get("status", {})
-                    if status.get("status_str") == "error":
-                        messages = status.get("messages", [])
-                        error_msg = "\n".join(str(m) for m in messages)
-                        raise ComfyUIError(f"Execution error:\n{error_msg}")
-                    break
+                # Check queue first - more reliable than history during execution
+                in_queue = self.is_prompt_in_queue(prompt_id)
+
+                if not in_queue:
+                    # Job not in queue - wait briefly for history to populate, then check
+                    time.sleep(1)
+                    history = self.get_history(prompt_id)
+                    if prompt_id in history:
+                        # Check for execution errors
+                        status = history[prompt_id].get("status", {})
+                        if status.get("status_str") == "error":
+                            messages = status.get("messages", [])
+                            error_msg = "\n".join(str(m) for m in messages)
+                            raise ComfyUIError(f"Execution error:\n{error_msg}")
+                        break
 
                 if on_progress:
                     on_progress(f"Waiting... ({format_duration(elapsed)})")
