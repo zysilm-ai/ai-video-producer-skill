@@ -31,39 +31,26 @@ COMMON_PATHS = [
 
 # Model definitions with expected locations and sizes
 REQUIRED_MODELS = {
-    "Flux UNET (GGUF)": {
-        "path": "models/unet/flux1-schnell-Q4_K_S.gguf",
-        "alt_paths": ["models/diffusion_models/flux1-schnell-Q4_K_S.gguf"],
-        "size_mb": 6000,  # ~6GB
+    # Qwen Image Edit 2511 models (for keyframe generation)
+    "Qwen Image Edit 2511": {
+        "path": "models/unet/qwen_image_edit_2511_fp8mixed.safetensors",
+        "size_mb": 12000,  # ~12GB
         "auto_download": True,
-        "source": "https://huggingface.co/city96/FLUX.1-schnell-gguf",
+        "source": "https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged",
     },
-    "Flux VAE": {
-        "path": "models/vae/ae.safetensors",
-        "size_mb": 300,
-        "auto_download": False,
-        "source": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/blob/main/ae.safetensors",
-        "note": "Requires HuggingFace authentication",
-    },
-    "Flux T5 Text Encoder": {
-        "path": "models/clip/t5xxl_fp8_e4m3fn.safetensors",
-        "alt_paths": ["models/text_encoders/t5xxl_fp8_e4m3fn.safetensors"],
-        "size_mb": 4600,  # ~4.6GB
+    "Qwen VL Text Encoder": {
+        "path": "models/clip/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "size_mb": 7500,  # ~7.5GB
         "auto_download": True,
-        "source": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf",
+        "source": "https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged",
     },
-    "Flux CLIP-L": {
-        "path": "models/clip/clip_l.safetensors",
-        "size_mb": 250,
+    "Qwen VAE": {
+        "path": "models/vae/qwen_image_vae.safetensors",
+        "size_mb": 200,
         "auto_download": True,
-        "source": "https://huggingface.co/comfyanonymous/flux_text_encoders",
+        "source": "https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged",
     },
-    "WAN High Noise Model": {
-        "path": "models/diffusion_models/wan2.2_i2v_high_noise_14B_Q4_K_M.gguf",
-        "size_mb": 8000,  # ~8GB
-        "auto_download": True,
-        "source": "https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF",
-    },
+    # WAN 2.2 models (for video generation)
     "WAN Low Noise Model": {
         "path": "models/diffusion_models/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf",
         "size_mb": 8000,  # ~8GB
@@ -79,13 +66,26 @@ REQUIRED_MODELS = {
     "WAN Text Encoder": {
         "path": "models/clip/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
         "alt_paths": ["models/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"],
-        "size_mb": 2000,  # ~2GB
+        "size_mb": 4900,  # ~4.9GB
         "auto_download": True,
         "source": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+    },
+    "WAN LightX2V LoRA": {
+        "path": "models/loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+        "size_mb": 700,
+        "auto_download": True,
+        "source": "https://huggingface.co/Kijai/WanVideo_comfy/tree/main/Lightx2v",
     },
 }
 
 OPTIONAL_MODELS = {
+    "Qwen ControlNet Union": {
+        "path": "models/controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors",
+        "size_mb": 3500,  # ~3.5GB
+        "auto_download": True,
+        "source": "https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets",
+        "note": "For pose-guided keyframe generation",
+    },
     "SigLIP Vision Encoder": {
         "path": "models/clip_vision/sigclip_vision_patch14_384.safetensors",
         "size_mb": 800,
@@ -93,19 +93,17 @@ OPTIONAL_MODELS = {
         "source": "https://huggingface.co/Comfy-Org/sigclip_vision_384",
         "note": "Used for image reference features",
     },
-    "WAN ControlNet Depth": {
-        "path": "models/controlnet/wan2.2-ti2v-5b-controlnet-depth-v1/diffusion_pytorch_model.safetensors",
-        "size_mb": 700,
-        "auto_download": False,
-        "source": "https://huggingface.co/TheDenk/wan2.2-ti2v-5b-controlnet-depth-v1",
-        "note": "For video structural consistency",
-    },
 }
 
 REQUIRED_NODES = [
     "ComfyUI-GGUF",
     "ComfyUI-WanVideoWrapper",
     "ComfyUI-VideoHelperSuite",
+    "ComfyUI_RH_Qwen-Image",
+]
+
+OPTIONAL_NODES = [
+    "comfyui_controlnet_aux",  # For pose preprocessing
 ]
 
 
@@ -290,7 +288,7 @@ def validate_setup(comfyui_path: Path | None = None, detailed: bool = False) -> 
                 print(f"    Source: {m['source']}")
                 if m["note"]:
                     print(f"    Note: {m['note']}")
-            print("\n  See docs/model-setup.md for detailed instructions.")
+            print("\n  See SETUP.md for detailed instructions.")
 
     return all_ok
 

@@ -1,6 +1,6 @@
 # AI Video Producer Skill
 
-A Claude Code skill for complete AI video production workflows using **WAN 2.2** video generation via **ComfyUI**. Runs entirely locally on consumer GPUs (RTX 3080+).
+A Claude Code skill for complete AI video production workflows using **WAN 2.2** video generation and **Qwen Image Edit 2511** keyframe generation via **ComfyUI**. Runs entirely locally on consumer GPUs (RTX 3080+).
 
 ## Overview
 
@@ -84,16 +84,15 @@ python scripts/setup_comfyui.py --check
 
 This will:
 1. Clone ComfyUI
-2. Install custom nodes (ComfyUI-GGUF, VideoHelperSuite, etc.)
+2. Install custom nodes (ComfyUI-GGUF, ComfyUI_RH_Qwen-Image, comfyui_controlnet_aux, etc.)
 3. Download WAN 2.2 GGUF model (~8.5GB)
 4. Download UMT5-XXL text encoder (~4.9GB)
 5. Download WAN VAE (~0.2GB)
 6. Download LightX2V distillation LoRA (~0.7GB)
-7. Download SD 3.5 Large GGUF model (~4.8GB)
-8. Download SD 3.5 text encoders (~6.5GB)
-9. Download SD 3.5 VAE (~0.2GB)
-10. Download SD 3.5 ControlNet models (~5GB)
-11. Download IP-Adapter for character consistency (~2GB)
+7. Download Qwen Image Edit 2511 model (~12GB)
+8. Download Qwen VL text encoder (~7.5GB)
+9. Download Qwen VAE (~0.2GB)
+10. Download ControlNet Union for pose guidance (~3.5GB)
 
 See [SETUP.md](SETUP.md) for detailed manual installation instructions.
 
@@ -110,10 +109,10 @@ cd D:/ComfyUI && python main.py --listen 0.0.0.0 --port 8188
 #### 3. Generate Keyframe Image
 
 ```bash
-python scripts/sd35_image.py \
+python scripts/qwen_image.py \
   --prompt "A warrior stands ready for battle, dramatic lighting" \
   --output outputs/scene-01/keyframe-start.png \
-  --width 832 --height 480
+  --preset medium
 ```
 
 #### 4. Generate Video (Image-to-Video)
@@ -200,10 +199,16 @@ After setup, models are stored in:
 ComfyUI/models/
 ├── diffusion_models/
 │   └── wan2.2_i2v_low_noise_14B_Q4_K_M.gguf
-├── text_encoders/
-│   └── umt5_xxl_fp8_e4m3fn_scaled.safetensors
+├── unet/
+│   └── qwen_image_edit_2511_fp8mixed.safetensors
+├── clip/
+│   ├── umt5_xxl_fp8_e4m3fn_scaled.safetensors
+│   └── qwen_2.5_vl_7b_fp8_scaled.safetensors
 ├── vae/
-│   └── wan_2.1_vae.safetensors
+│   ├── wan_2.1_vae.safetensors
+│   └── qwen_image_vae.safetensors
+├── controlnet/
+│   └── Qwen-Image-InstantX-ControlNet-Union.safetensors
 └── loras/
     └── Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors
 ```
@@ -227,51 +232,52 @@ python scripts/wan_video.py \
   [--seed 0]
 ```
 
-### sd35_image.py
+### qwen_image.py
 
-Generate keyframe images with character and spatial consistency.
+Generate keyframe images using Qwen Image Edit 2511 with multiple modes.
 
 ```bash
-python scripts/sd35_image.py \
+python scripts/qwen_image.py \
   --prompt "Image description" \
   --output path/to/output.png \
   [--style-ref path/to/style.json] \
   [--reference path/to/reference.png] \
-  [--mode action|static] \
-  [--controlnet-strength 0.7] \
-  [--width 832] [--height 480]
+  [--pose path/to/pose.png] \
+  [--control-strength 0.8] \
+  [--preset low|medium|high]
 ```
 
-#### Mode Selection
+#### Generation Modes
 
-| Mode | Workflow | Best For |
-|------|----------|----------|
-| `action` | IP-Adapter only | Fighting, sports, dancing - allows position changes |
-| `static` | Depth + IP-Adapter | Talking, standing, camera moves - locks positions |
+| Mode | Command | Best For |
+|------|---------|----------|
+| **T2I** | No reference | Initial keyframe, establishing shots |
+| **Edit** | `--reference` only | Editing existing image, maintaining consistency |
+| **Pose** | `--reference` + `--pose` | Dramatic pose changes while keeping identity |
 
-#### ControlNet Strength (static mode)
+#### ControlNet Strength (pose mode)
 
 | Strength | Effect |
 |----------|--------|
-| `0.7-1.0` | Strong spatial lock (default) |
-| `0.4-0.6` | Moderate - allows slight shifts |
-| `0.2-0.3` | Light guidance |
+| `0.8-1.0` | Strong pose guidance (default) |
+| `0.5-0.7` | Moderate - allows some variation |
+| `0.3-0.5` | Light guidance |
 
-**Example - Action scene (boxing):**
+**Example - Edit mode (maintain consistency):**
 ```bash
-python scripts/sd35_image.py \
-  --prompt "Boxer lands a powerful punch" \
+python scripts/qwen_image.py \
+  --prompt "Same character now smiling" \
   --reference keyframe-start.png \
-  --mode action \
   --output keyframe-end.png
 ```
 
-**Example - Static scene with custom strength:**
+**Example - Pose mode (change pose):**
 ```bash
-python scripts/sd35_image.py \
-  --prompt "Character turns head slightly" \
+python scripts/qwen_image.py \
+  --prompt "Character sitting in meditation pose" \
   --reference keyframe-start.png \
-  --mode static --controlnet-strength 0.5 \
+  --pose assets/poses/meditation.png \
+  --control-strength 0.8 \
   --output keyframe-end.png
 ```
 
@@ -295,17 +301,22 @@ gemini-video-producer-skill/
 ├── SETUP.md                 # Detailed setup guide
 ├── requirements.txt         # Python dependencies
 ├── scripts/
-│   ├── wan_video.py         # Video generation
-│   ├── sd35_image.py        # Keyframe image generation (SD 3.5 + IP-Adapter)
+│   ├── wan_video.py         # Video generation (WAN 2.2)
+│   ├── qwen_image.py        # Keyframe generation (Qwen Image Edit 2511)
 │   ├── setup_comfyui.py     # Auto-setup script
 │   ├── comfyui_client.py    # ComfyUI API client
 │   └── workflows/
 │       ├── wan_i2v.json     # Image-to-Video workflow
-│       └── wan_flf2v.json   # First-Last-Frame workflow
+│       ├── wan_flf2v.json   # First-Last-Frame workflow
+│       ├── qwen_t2i.json    # Qwen Text-to-Image workflow
+│       ├── qwen_edit.json   # Qwen Edit workflow
+│       └── qwen_pose.json   # Qwen Pose-guided workflow
 ├── references/
 │   ├── prompt-engineering.md
 │   ├── style-systems.md
 │   └── troubleshooting.md
+├── docs/
+│   └── ADVANCED_KEYFRAME_PLAN.md  # Layer-based generation docs
 └── outputs/                 # Generated content
 ```
 

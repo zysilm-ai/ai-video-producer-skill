@@ -1,6 +1,6 @@
-# Setup Guide: WAN 2.2 Video Generation
+# Setup Guide: WAN 2.2 Video + Qwen Image Edit 2511
 
-This guide covers setting up the local environment for AI video generation using WAN 2.2 GGUF models via ComfyUI.
+This guide covers setting up the local environment for AI video generation using WAN 2.2 GGUF models and Qwen Image Edit 2511 for keyframes via ComfyUI.
 
 ## System Requirements
 
@@ -62,6 +62,8 @@ git clone https://github.com/ltdrdata/ComfyUI-Manager.git
    - **ComfyUI-GGUF** (City96) - Required for GGUF models
    - **ComfyUI-WanVideoWrapper** (Kijai) - WAN model support
    - **ComfyUI-VideoHelperSuite** - Video export utilities
+   - **ComfyUI_RH_Qwen-Image** - Qwen Image Edit 2511 support
+   - **comfyui_controlnet_aux** - Pose preprocessors for ControlNet
 
 ### Manual Installation
 
@@ -76,6 +78,12 @@ git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git
 
 # Video utilities
 git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
+
+# Qwen Image Edit support
+git clone https://github.com/Robinyo/ComfyUI_RH_Qwen-Image.git
+
+# ControlNet preprocessors (for pose guidance)
+git clone https://github.com/Fannovel16/comfyui_controlnet_aux.git
 ```
 
 Restart ComfyUI after installing nodes.
@@ -130,20 +138,34 @@ wget -P ComfyUI/models/vae/ \
   https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors
 ```
 
-### 3.4 Flux Model (for Image Generation)
+### 3.4 Qwen Image Edit 2511 (for Keyframe Generation)
 
 ```bash
 mkdir -p ComfyUI/models/unet
 mkdir -p ComfyUI/models/clip
+mkdir -p ComfyUI/models/vae
 
-# Option 1: Flux.1 schnell (faster, 4 steps)
-# Download from https://huggingface.co/black-forest-labs/FLUX.1-schnell
+# Download Qwen Image Edit 2511 model (FP8 mixed)
+wget -P ComfyUI/models/unet/ \
+  https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged/resolve/main/split_files/unet/qwen_image_edit_2511_fp8mixed.safetensors
 
-# Option 2: Flux.1 dev (higher quality)
-# Download from https://huggingface.co/black-forest-labs/FLUX.1-dev
+# Download Qwen VL text encoder
+wget -P ComfyUI/models/clip/ \
+  https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
 
-# For low VRAM, use GGUF quantized versions:
-# https://huggingface.co/city96/FLUX.1-schnell-gguf
+# Download Qwen VAE
+wget -P ComfyUI/models/vae/ \
+  https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged/resolve/main/split_files/vae/qwen_image_vae.safetensors
+```
+
+### 3.5 ControlNet Union (for Pose Guidance)
+
+```bash
+mkdir -p ComfyUI/models/controlnet
+
+# Download Qwen-compatible ControlNet Union
+wget -P ComfyUI/models/controlnet/ \
+  https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets/resolve/main/split_files/controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors
 ```
 
 ---
@@ -155,14 +177,19 @@ After setup, your ComfyUI models folder should look like:
 ```
 ComfyUI/models/
 ├── diffusion_models/
-│   ├── wan2.2_i2v_high_noise_14B_Q4_K_M.gguf
 │   └── wan2.2_i2v_low_noise_14B_Q4_K_M.gguf
+├── unet/
+│   └── qwen_image_edit_2511_fp8mixed.safetensors
 ├── clip/
-│   └── umt5_xxl_fp8_e4m3fn_scaled.safetensors
+│   ├── umt5_xxl_fp8_e4m3fn_scaled.safetensors
+│   └── qwen_2.5_vl_7b_fp8_scaled.safetensors
 ├── vae/
-│   └── wan_2.1_vae.safetensors
-└── unet/
-    └── flux1-schnell.safetensors  (or GGUF version)
+│   ├── wan_2.1_vae.safetensors
+│   └── qwen_image_vae.safetensors
+├── controlnet/
+│   └── Qwen-Image-InstantX-ControlNet-Union.safetensors
+└── loras/
+    └── Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors
 ```
 
 ---
