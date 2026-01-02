@@ -1,13 +1,15 @@
 ---
 name: ai-video-producer
 description: >
-  Complete AI video production workflow using WAN 2.2 and Qwen Image Edit 2509 models via ComfyUI.
+  Complete AI video production workflow using WAN 2.2 and Qwen Image Edit 2511 models via ComfyUI.
   Creates any video type: promotional, educational, narrative, social media,
   animations, game trailers, music videos, product demos, and more. Use when
   users want to create videos with AI, need help with video storyboarding,
   keyframe generation, or video prompt writing. Follows a philosophy-first
   approach: establish visual style and production philosophy, then execute
-  scene by scene with user feedback at each stage. Runs locally on RTX 3080+.
+  scene by scene with user feedback at each stage. Supports advanced features
+  like layer-based compositing, pose transfer (AnyPose LoRA), and style
+  consistency (InStyle LoRA). Runs locally on RTX 3080+.
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, TodoWrite
 ---
 
@@ -17,7 +19,7 @@ Create professional AI-generated videos through a structured, iterative workflow
 
 ## Prerequisites & Auto-Setup
 
-**This skill requires ComfyUI with WAN 2.2 and Qwen Image Edit 2509 models. The setup script handles everything automatically.**
+**This skill requires ComfyUI with WAN 2.2 and Qwen Image Edit 2511 models. The setup script handles everything automatically.**
 
 ### First-Time Setup (Automatic)
 
@@ -36,10 +38,11 @@ python {baseDir}/scripts/setup_comfyui.py --start
 
 The setup script will:
 1. Clone and configure ComfyUI
-2. Install required custom nodes (ComfyUI-GGUF, ComfyUI_RH_Qwen-Image, etc.)
+2. Install required custom nodes (ComfyUI-GGUF, ComfyUI_RH_Qwen-Image, comfyui_controlnet_aux, etc.)
 3. Download WAN 2.2 GGUF model (Q4_K_M for 10GB VRAM)
-4. Download Qwen Image Edit 2509 models (FP8)
-5. Install all Python dependencies
+4. Download Qwen Image Edit 2511 models (FP8)
+5. Download ControlNet Union model for pose-guided generation
+6. Install all Python dependencies
 
 ### Before Each Session
 
@@ -67,10 +70,11 @@ No manual intervention required - just start your video project conversation.
 
 1. **ALWAYS use TodoWrite** at the start to create a task list for the entire workflow
 2. **NEVER skip phases** - complete each phase in order before proceeding
-3. **ALWAYS create required files** - philosophy.md, style.json, and scene-breakdown.md are REQUIRED
+3. **ALWAYS create required files** - philosophy.md, style.json, scene-breakdown.md, and assets.json are REQUIRED
 4. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 5 seconds
 5. **ALWAYS ask user for approval** before proceeding to the next phase
-6. **NEVER generate video without scene breakdown** - plan first, execute second
+6. **NEVER generate video without scene breakdown and assets** - plan first, execute second
+7. **ALWAYS use layer-based generation** for character scenes (background → character → composite)
 
 ## Standard Checkpoint Format (ALL PHASES)
 
@@ -95,7 +99,8 @@ No manual intervention required - just start your video project conversation.
 | Phase | Required Outputs | Checkpoint |
 |-------|------------------|------------|
 | 1. Production Philosophy | `philosophy.md`, `style.json` | Ask user to review before Phase 2 |
-| 2. Scene Breakdown | `scene-breakdown.md` | Ask user to approve scene plan before Phase 3 |
+| 2. Scene Breakdown | `scene-breakdown.md` | Ask user to approve scene plan before Phase 2.5 |
+| 2.5. Asset Generation | `assets.json`, `assets/` folder | Ask user to review assets before Phase 3 |
 | 3. Keyframe Generation | `scene-XX/keyframe-*.png` | Show user each keyframe, get approval |
 | 4. Video Synthesis | `scene-XX/video.mp4` | Show user each video segment |
 | 5. Review & Iterate | Refinements as needed | User signs off on final result |
@@ -204,12 +209,23 @@ Before creating scenes, determine:
 
 ## Scene 1: [Title]
 
+**Type**: character | landscape
 **Duration**: [X seconds] (max 5 seconds per scene)
 **Purpose**: [What this scene communicates]
 
-**Keyframes Required**:
-- Start frame: [detailed description]
-- End frame: [detailed description if using dual-frame mode]
+**Characters**: [asset name from assets.json, e.g., "samurai"] (only for type: character)
+**Background**: [asset name from assets.json, e.g., "temple_courtyard"]
+**Style**: [asset name from assets.json, e.g., "ghibli"]
+
+**Start Frame**:
+- pose: [asset name from assets.json, e.g., "standing"]
+- expression: [description]
+- additional details: [any other specific details]
+
+**End Frame**:
+- pose: [asset name from assets.json, e.g., "meditation"]
+- expression: [description]
+- additional details: [any other specific details]
 
 **Motion Description**:
 [Specific actions and movements that occur]
@@ -232,11 +248,15 @@ Before creating scenes, determine:
 
 ## Generation Strategy
 
-| Scene | Mode | Keyframes | Notes |
-|-------|------|-----------|-------|
-| 1 | [single/dual] | [1-2] | [any special notes] |
-| 2 | [single/dual] | [1-2] | [any special notes] |
+| Scene | Type | Mode | Keyframes | Notes |
+|-------|------|------|-----------|-------|
+| 1 | character | composite | 2 | Uses layers/ for background + character |
+| 2 | landscape | single | 2 | Background only, no character layer |
 ```
+
+**Scene Type Explanation:**
+- `character`: Scenes with characters - uses 3-step composite flow (background → character → composite)
+- `landscape`: Scenes without characters - uses single background generation
 
 ### Scene Count Guidelines
 
@@ -254,10 +274,115 @@ Before creating scenes, determine:
 
 1. Inform user that `scene-breakdown.md` has been created with [N] scenes
 2. Use AskUserQuestion:
-   - **"Approve"** - Proceed to keyframe generation
+   - **"Approve"** - Proceed to asset generation
    - User selects **"Other"** to specify changes
 
 If user requests changes → make adjustments → ask again → repeat until approved
+
+---
+
+## Phase 2.5: Asset Generation (REQUIRED)
+
+**DO NOT PROCEED TO PHASE 3 UNTIL `assets.json` EXISTS AND USER APPROVES**
+
+This phase creates reusable assets that maintain consistency across all scenes.
+
+### Step 2.5.1: Analyze Required Assets
+
+Review `scene-breakdown.md` and identify all unique:
+- Characters (each character that appears in scenes)
+- Backgrounds (each unique location/environment)
+- Poses (each unique character pose needed)
+- Styles (the visual style to apply consistently)
+- Objects (any recurring props or items)
+
+### Step 2.5.2: Create assets.json
+
+**MANDATORY FORMAT:**
+
+```json
+{
+  "characters": {
+    "samurai": {
+      "description": "Feudal Japanese warrior, red armor, stern expression, dark hair",
+      "identity_ref": "assets/characters/samurai.png"
+    }
+  },
+  "backgrounds": {
+    "temple_courtyard": {
+      "description": "Ancient temple with cherry blossoms, stone paths, morning light",
+      "ref_image": "assets/backgrounds/temple_courtyard.png"
+    }
+  },
+  "poses": {
+    "standing": {
+      "description": "Upright neutral stance, arms at sides",
+      "ref_image": "assets/poses/standing.png"
+    },
+    "meditation": {
+      "description": "Seated cross-legged, hands on knees, eyes closed",
+      "ref_image": "assets/poses/meditation.png"
+    }
+  },
+  "styles": {
+    "ghibli": {
+      "description": "Studio Ghibli anime aesthetic, soft colors, painterly",
+      "ref_image": "assets/styles/ghibli.png"
+    }
+  },
+  "objects": {
+    "katana": {
+      "description": "Traditional Japanese sword with black sheath",
+      "ref_image": "assets/objects/katana.png"
+    }
+  }
+}
+```
+
+### Step 2.5.3: Generate Asset Images
+
+Create the `assets/` directory structure and generate each asset:
+
+```bash
+mkdir -p {output_dir}/assets/characters
+mkdir -p {output_dir}/assets/backgrounds
+mkdir -p {output_dir}/assets/poses
+mkdir -p {output_dir}/assets/styles
+mkdir -p {output_dir}/assets/objects
+```
+
+**Generate each asset using T2I mode:**
+```bash
+# Character identity (use detailed description)
+python {baseDir}/scripts/qwen_image.py \
+  --prompt "Portrait of [character description], neutral pose, clean background" \
+  --output {output_dir}/assets/characters/[name].png
+
+# Background (use detailed environment description)
+python {baseDir}/scripts/qwen_image.py \
+  --prompt "[Background description], no people, establishing shot" \
+  --output {output_dir}/assets/backgrounds/[name].png
+
+# Pose reference (simple figure showing pose)
+python {baseDir}/scripts/qwen_image.py \
+  --prompt "Simple figure demonstrating [pose description], minimal background" \
+  --output {output_dir}/assets/poses/[name].png
+
+# Style reference (example image in target style)
+python {baseDir}/scripts/qwen_image.py \
+  --prompt "Example scene in [style description] style, demonstration of artistic style" \
+  --output {output_dir}/assets/styles/[name].png
+```
+
+### Step 2.5.4: CHECKPOINT - Get User Approval
+
+1. Inform user that `assets.json` and asset images have been created
+2. Show the generated assets to user
+3. Use AskUserQuestion:
+   - **"Approve"** - Proceed to keyframe generation
+   - User selects **"Other"** to specify which assets need adjustment
+
+If user requests changes → regenerate specific assets → ask again → repeat until approved
 
 ---
 
@@ -265,63 +390,117 @@ If user requests changes → make adjustments → ask again → repeat until app
 
 **FOR EACH SCENE, generate keyframes before moving to the next scene.**
 
-### CRITICAL: Reference Image Rules for Consistency
+### Generation Flow by Scene Type
 
-**YOU MUST follow these rules to maintain character/background consistency:**
+Keyframe generation uses different flows based on scene type from `scene-breakdown.md`:
 
-1. **First keyframe of Scene 1**: No reference needed (T2I mode - establishes the visual style).
-2. **All subsequent keyframes**: MUST use `--reference` flag with previous keyframe(s) (Qwen Edit mode).
-3. **End keyframe**: ALWAYS reference the start keyframe of the same scene.
-4. **Next scene's start keyframe**: ALWAYS reference the previous scene's end keyframe (or start if no end).
+| Scene Type | Generation Flow |
+|------------|-----------------|
+| `character` | 3-step composite: background → character → composite |
+| `landscape` | Single step: background only |
 
-**Reference Chain Example:**
-```
-Scene 1 start (T2I) → (reference for) → Scene 1 end (Edit)
-Scene 1 end         → (reference for) → Scene 2 start (Edit)
-Scene 2 start       → (reference for) → Scene 2 end (Edit)
-... and so on
-```
+### Reference Chain Rules
 
-### Step 3.1: Set Up Scene Directory
+**These rules ensure consistency across scenes:**
+
+| Asset Type | Chain Behavior |
+|------------|----------------|
+| **Character Identity** | ALWAYS use original asset from `assets/characters/` (never chain) |
+| **Character Pose** | Reference from `assets/poses/` per keyframe |
+| **Background** | Chain from previous scene's background for continuity |
+| **Style** | ALWAYS apply with style asset reference |
+
+### Step 3.1: Set Up Scene Directories
 
 ```bash
-mkdir -p {output_dir}/scene-01
-mkdir -p {output_dir}/scene-02
+mkdir -p {output_dir}/scene-01/layers
+mkdir -p {output_dir}/scene-02/layers
 # ... for each scene
 ```
 
-### Step 3.2: Generate Keyframes Per Scene
+### Step 3.2: Character Scene Generation (type: character)
 
-**Scene 1 - First keyframe (T2I - no reference):**
+**Character scenes use a 3-step composite flow:**
+
+```
+Step 1: Generate Background Layer
+         ↓
+Step 2: Generate Character Layer (with pose)
+         ↓
+Step 3: Composite Layers Together
+         ↓
+Output: keyframe-start.png
+```
+
+**Step 1 - Generate Background Layer:**
 ```bash
-# Scene 1: Start keyframe - establishes visual style
+# Use background asset OR chain from previous scene
 python {baseDir}/scripts/qwen_image.py \
-  --prompt "[Detailed prompt from scene-breakdown.md]" \
+  --prompt "[Background description], [style] style, no people, establishing shot" \
   --style-ref {output_dir}/style.json \
+  --reference {output_dir}/assets/backgrounds/[background_name].png \
+  --output {output_dir}/scene-01/layers/background.png
+```
+
+**Step 2 - Generate Character Layer (with pose transfer):**
+```bash
+# Character identity + pose reference
+python {baseDir}/scripts/qwen_image.py \
+  --prompt "[Character] in [pose description], [expression], transparent background" \
+  --style-ref {output_dir}/style.json \
+  --reference {output_dir}/assets/characters/[character_name].png \
+  --pose {output_dir}/assets/poses/[pose_name].png \
+  --control-strength 0.8 \
+  --output {output_dir}/scene-01/layers/character.png
+```
+
+**Step 3 - Composite Layers:**
+```bash
+# Combine background + character into final keyframe
+python {baseDir}/scripts/qwen_image.py \
+  --prompt "Place [character] naturally in [background] scene, [style] style" \
+  --reference {output_dir}/scene-01/layers/background.png \
+  --reference {output_dir}/scene-01/layers/character.png \
   --output {output_dir}/scene-01/keyframe-start.png
 ```
 
-**Scene 1 - End keyframe (MUST reference start):**
-```bash
-# Scene 1: End keyframe - Uses Qwen Edit to modify the start frame
-python {baseDir}/scripts/qwen_image.py \
-  --prompt "[Detailed prompt - dramatic new pose/action]" \
-  --style-ref {output_dir}/style.json \
-  --reference {output_dir}/scene-01/keyframe-start.png \
-  --output {output_dir}/scene-01/keyframe-end.png
-```
+**End Keyframe (different pose):**
+Repeat Steps 2-3 with the end frame pose from `scene-breakdown.md`.
 
-**Scene 2+ - Start keyframe (MUST reference previous scene):**
+### Step 3.3: Landscape Scene Generation (type: landscape)
+
+**Landscape scenes generate background only:**
+
 ```bash
-# Scene 2: Start keyframe - MUST reference Scene 1's end keyframe
+# Scene 2: Landscape - background only
 python {baseDir}/scripts/qwen_image.py \
-  --prompt "[Detailed prompt for scene 2 start]" \
+  --prompt "[Background description with scene details], [style] style" \
   --style-ref {output_dir}/style.json \
-  --reference {output_dir}/scene-01/keyframe-end.png \
+  --reference {output_dir}/assets/backgrounds/[background_name].png \
   --output {output_dir}/scene-02/keyframe-start.png
+
+# Also save to layers for reference chain
+cp {output_dir}/scene-02/keyframe-start.png {output_dir}/scene-02/layers/background.png
 ```
 
-### Step 3.3: Keyframe Quality Checklist
+### Step 3.4: Scene Continuity
+
+**For consecutive scenes sharing backgrounds:**
+```bash
+# Scene 3 uses Scene 2's background as reference (chaining)
+python {baseDir}/scripts/qwen_image.py \
+  --prompt "[Modified background description]" \
+  --reference {output_dir}/scene-02/layers/background.png \
+  --output {output_dir}/scene-03/layers/background.png
+```
+
+**For character identity (NEVER chain - always use original):**
+```bash
+# ALWAYS reference original character asset, not previous keyframe
+--reference {output_dir}/assets/characters/[character_name].png
+```
+
+### Step 3.5: Keyframe Quality Checklist
 
 Before proceeding to video, verify EACH keyframe:
 - [ ] Subject appears correctly (no distortion)
@@ -333,7 +512,7 @@ Before proceeding to video, verify EACH keyframe:
 
 **If consistency check fails**: Regenerate the keyframe with the same reference images. Do NOT proceed with inconsistent keyframes.
 
-### Step 3.4: MANDATORY CHECKPOINT - Human Review After EACH Keyframe
+### Step 3.6: MANDATORY CHECKPOINT - Human Review After EACH Keyframe
 
 **After generating EACH keyframe, you MUST:**
 
@@ -431,17 +610,42 @@ If user requests changes:
 
 ```
 {output_dir}/
-├── philosophy.md           # REQUIRED - Production philosophy
-├── style.json             # REQUIRED - Style configuration
-├── scene-breakdown.md     # REQUIRED - Full scene breakdown
+├── philosophy.md              # REQUIRED - Production philosophy
+├── style.json                 # REQUIRED - Style configuration
+├── scene-breakdown.md         # REQUIRED - Full scene breakdown
+├── assets.json                # REQUIRED - Asset definitions
+│
+├── assets/                    # Reusable assets
+│   ├── characters/
+│   │   ├── samurai.png
+│   │   └── ninja.png
+│   ├── backgrounds/
+│   │   ├── temple_courtyard.png
+│   │   └── mountain_sunset.png
+│   ├── poses/
+│   │   ├── standing.png
+│   │   ├── meditation.png
+│   │   └── fighting.png
+│   ├── styles/
+│   │   └── ghibli.png
+│   └── objects/
+│       └── katana.png
+│
 ├── scene-01/
-│   ├── keyframe-start.png
-│   ├── keyframe-end.png   # If using dual-frame
+│   ├── layers/                # Intermediate layers (character scenes)
+│   │   ├── background.png
+│   │   └── character.png
+│   ├── keyframe-start.png     # Final composite
+│   ├── keyframe-end.png
 │   └── video.mp4
+│
 ├── scene-02/
+│   ├── layers/
+│   │   └── background.png     # Landscape - no character layer
 │   ├── keyframe-start.png
 │   ├── keyframe-end.png
 │   └── video.mp4
+│
 └── [additional scenes...]
 ```
 
@@ -458,11 +662,15 @@ At the START of the workflow, create this todo list:
 4. Get user approval on production philosophy
 5. Create scene-breakdown.md
 6. Get user approval on scene breakdown
-7. Generate Scene 1 keyframes
-8. Get user approval on Scene 1 keyframes
-9. Generate Scene 1 video
-10. [Repeat 7-9 for each scene]
-11. Provide final summary to user
+7. Analyze required assets from scene breakdown
+8. Create assets.json
+9. Generate asset images (characters, backgrounds, poses, styles)
+10. Get user approval on assets
+11. Generate Scene 1 keyframes (layers → composite)
+12. Get user approval on Scene 1 keyframes
+13. Generate Scene 1 video
+14. [Repeat 11-13 for each scene]
+15. Provide final summary to user
 ```
 
 ### Auto-Setup Check (Step 1)
@@ -488,7 +696,7 @@ If ComfyUI is not running, start it in the background before proceeding.
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `qwen_image.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--style-ref`, `--reference` |
+| `qwen_image.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--style-ref`, `--reference`, `--pose`, `--control-strength` |
 | `wan_video.py` | Generate videos (WAN 2.2) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
 | `comfyui_client.py` | Test ComfyUI connection | (run directly to test) |
 
@@ -497,7 +705,9 @@ If ComfyUI is not running, start it in the background before proceeding.
 | Mode | Command | Description |
 |------|---------|-------------|
 | **T2I** | `qwen_image.py ...` (no ref) | Create initial image from scratch. |
-| **Edit** | `qwen_image.py ... --reference ...` | Edit existing image (pose, expression) while maintaining consistency. |
+| **Edit** | `qwen_image.py ... --reference ...` | Edit existing image while maintaining consistency. |
+| **Pose** | `qwen_image.py ... --reference ... --pose ...` | Generate with pose transfer (ControlNet). |
+| **Composite** | `qwen_image.py ... --reference [bg] --reference [char] ...` | Combine multiple images. |
 
 ### Video Generation Modes
 
@@ -526,13 +736,19 @@ If ComfyUI is not running, start it in the background before proceeding.
 | wan_2.1_vae.safetensors | 0.2GB | WAN VAE |
 | Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors | 0.7GB | Fast generation LoRA |
 
-**Keyframe Generation (Qwen Image Edit 2509):**
+**Keyframe Generation (Qwen Image Edit 2511):**
 | Model | Size | Purpose |
 |-------|------|---------|
-| qwen_image_fp8_e4m3fn.safetensors | 12.0GB | Main Image Model (FP8) |
+| qwen_image_edit_2511_fp8mixed.safetensors | 12.0GB | Main Image Model (FP8) |
 | qwen_2.5_vl_7b_fp8_scaled.safetensors | 7.5GB | Vision-Language Text Encoder |
 | qwen_image_vae.safetensors | 0.2GB | Qwen VAE |
+
+**ControlNet (for pose-guided generation):**
+| Model | Size | Purpose |
+|-------|------|---------|
+| Qwen-Image-InstantX-ControlNet-Union.safetensors | 3.54GB | Pose/depth/canny control |
 
 See `SETUP.md` for installation instructions.
 See `references/prompt-engineering.md` for detailed prompt writing guidance.
 See `references/troubleshooting.md` for common issues and solutions.
+See `docs/ADVANCED_KEYFRAME_PLAN.md` for advanced layer-based generation details.

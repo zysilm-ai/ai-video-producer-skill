@@ -27,12 +27,29 @@ from pathlib import Path
 COMFYUI_REPO = "https://github.com/comfyanonymous/ComfyUI.git"
 COMFYUI_DIR = Path("D:/comfyui")
 
+# Additional pip packages required for custom nodes (installed separately to avoid conflicts)
+ADDITIONAL_PIP_PACKAGES = [
+    # Required for comfyui_controlnet_aux (OpenPose, DWPose preprocessors)
+    "matplotlib",
+    "scikit-image",
+    "scipy",
+    "einops",
+    "fvcore",
+    "addict",
+    "yacs",
+    "trimesh",
+    "albumentations",
+    "mediapipe",
+]
+
 CUSTOM_NODES = {
     "ComfyUI-GGUF": "https://github.com/city96/ComfyUI-GGUF.git",
     "ComfyUI-VideoHelperSuite": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
     "ComfyUI-Manager": "https://github.com/ltdrdata/ComfyUI-Manager.git",
     # Qwen Image support
     "ComfyUI_RH_Qwen-Image": "https://github.com/HM-RunningHub/ComfyUI_RH_Qwen-Image.git",
+    # ControlNet preprocessors (DWPose for pose estimation)
+    "comfyui_controlnet_aux": "https://github.com/Fannovel16/comfyui_controlnet_aux.git",
 }
 
 # Model URLs and paths (relative to ComfyUI/models/)
@@ -91,6 +108,15 @@ MODELS = {
         "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
         "size_gb": 0.7,
         "required": False,  # Optional for fast generation
+    },
+    # ===========================================
+    # ControlNet Models (Pose-guided generation)
+    # ===========================================
+    # Qwen Image ControlNet Union (supports pose, depth, canny, soft edge)
+    "controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets/resolve/main/split_files/controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors",
+        "size_gb": 3.54,
+        "required": False,  # Optional for pose-guided generation
     },
 }
 
@@ -235,7 +261,20 @@ def setup_custom_nodes(comfyui_dir: Path):
         req_file = node_dir / "requirements.txt"
         if req_file.exists():
             print_status(f"Installing {name} dependencies...", "progress")
-            run_command([sys.executable, "-m", "pip", "install", "-r", str(req_file)])
+            # Use --user flag to avoid permission issues on Windows
+            try:
+                run_command([sys.executable, "-m", "pip", "install", "-r", str(req_file)])
+            except subprocess.CalledProcessError:
+                print_status(f"Some {name} dependencies failed, trying with --user...", "warning")
+                run_command([sys.executable, "-m", "pip", "install", "--user", "-r", str(req_file)], check=False)
+
+    # Install additional pip packages that may conflict with node requirements
+    if ADDITIONAL_PIP_PACKAGES:
+        print_status("Installing additional dependencies for preprocessors...", "progress")
+        try:
+            run_command([sys.executable, "-m", "pip", "install", "--user"] + ADDITIONAL_PIP_PACKAGES)
+        except subprocess.CalledProcessError:
+            print_status("Some additional packages failed to install", "warning")
 
     print_status("Custom nodes installed", "success")
 

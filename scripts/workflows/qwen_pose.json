@@ -1,0 +1,191 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_edit_2511_fp8mixed.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Load Qwen Image Edit 2511 Model"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "sd3"
+    },
+    "_meta": {
+      "title": "Load Qwen VL Text Encoder"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Load Qwen VAE"
+    }
+  },
+  "20": {
+    "class_type": "ControlNetLoader",
+    "inputs": {
+      "control_net_name": "Qwen-Image-InstantX-ControlNet-Union.safetensors"
+    },
+    "_meta": {
+      "title": "Load ControlNet Union"
+    }
+  },
+  "21": {
+    "class_type": "SetUnionControlNetType",
+    "inputs": {
+      "control_net": ["20", 0],
+      "type": "openpose"
+    },
+    "_meta": {
+      "title": "Set ControlNet Type to Pose"
+    }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{REFERENCE}}"
+    },
+    "_meta": {
+      "title": "Reference Image (Character Identity)"
+    }
+  },
+  "11": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{POSE}}"
+    },
+    "_meta": {
+      "title": "Pose Image"
+    }
+  },
+  "22": {
+    "class_type": "OpenposePreprocessor",
+    "inputs": {
+      "image": ["11", 0],
+      "detect_hand": "enable",
+      "detect_body": "enable",
+      "detect_face": "disable",
+      "resolution": 832
+    },
+    "_meta": {
+      "title": "OpenPose Preprocessor"
+    }
+  },
+  "24": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": ["22", 0],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Scale Pose to Generation Size"
+    }
+  },
+  "4": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {
+      "clip": ["2", 0],
+      "vae": ["3", 0],
+      "image1": ["10", 0],
+      "prompt": "{{PROMPT}}"
+    },
+    "_meta": {
+      "title": "Positive Prompt (Qwen Edit Plus with Reference)"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "bad quality, worst quality, blurry, distorted, deformed, ugly, low resolution",
+      "clip": ["2", 0]
+    },
+    "_meta": {
+      "title": "Negative Prompt"
+    }
+  },
+  "6": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 832,
+      "height": 480,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty SD3 Latent"
+    }
+  },
+  "25": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": ["1", 0],
+      "shift": 1.73
+    },
+    "_meta": {
+      "title": "Model Sampling AuraFlow"
+    }
+  },
+  "23": {
+    "class_type": "ControlNetApplySD3",
+    "inputs": {
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "control_net": ["21", 0],
+      "vae": ["3", 0],
+      "image": ["24", 0],
+      "strength": 0.9,
+      "start_percent": 0.0,
+      "end_percent": 1.0
+    },
+    "_meta": {
+      "title": "Apply ControlNet Pose (with VAE)"
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["25", 0],
+      "positive": ["23", 0],
+      "negative": ["23", 1],
+      "latent_image": ["6", 0],
+      "seed": 0,
+      "steps": 20,
+      "cfg": 4.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["3", 0]
+    },
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["8", 0],
+      "filename_prefix": "qwen_keyframe_pose"
+    },
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

@@ -31,6 +31,7 @@ from utils import (
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
 T2I_WORKFLOW = WORKFLOW_DIR / "qwen_t2i.json"
 EDIT_WORKFLOW = WORKFLOW_DIR / "qwen_edit.json"
+POSE_WORKFLOW = WORKFLOW_DIR / "qwen_pose.json"
 
 # Resolution presets for different VRAM levels
 RESOLUTION_PRESETS = {
@@ -67,14 +68,11 @@ def update_workflow_prompts(workflow: dict, prompt: str, negative_prompt: str = 
     return workflow
 
 
-def update_workflow_images(workflow: dict, reference_image: str = None) -> dict:
-    """Update image inputs in workflow for Editing mode.
+def update_workflow_images(workflow: dict, reference_image: str = None, pose_image: str = None) -> dict:
+    """Update image inputs in workflow for Editing/Pose mode.
 
-    Handles both LoadImage nodes and TextEncodeQwenImageEditPlus image inputs.
+    Handles LoadImage nodes for both reference and pose images.
     """
-    if not reference_image:
-        return workflow
-
     for node_id, node in workflow.items():
         if not isinstance(node, dict):
             continue
@@ -87,8 +85,38 @@ def update_workflow_images(workflow: dict, reference_image: str = None) -> dict:
         if class_type == "LoadImage":
             current_image = str(inputs.get("image", ""))
             # Update reference/input image
-            if "{{REFERENCE}}" in current_image or "reference" in title:
+            if reference_image and ("{{REFERENCE}}" in current_image or "reference" in title):
                 workflow[node_id]["inputs"]["image"] = reference_image
+            # Update pose image
+            if pose_image and ("{{POSE}}" in current_image or "pose" in title):
+                workflow[node_id]["inputs"]["image"] = pose_image
+
+    return workflow
+
+
+def update_workflow_controlnet(workflow: dict, control_strength: float = 0.9, width: int = 832, height: int = 480) -> dict:
+    """Update ControlNet parameters in workflow."""
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+
+        class_type = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+
+        # Update ControlNet strength
+        if class_type in ["ControlNetApplyAdvanced", "ControlNetApplySD3"]:
+            workflow[node_id]["inputs"]["strength"] = control_strength
+
+        # Update OpenPose preprocessor resolution (use max dimension)
+        if class_type == "OpenposePreprocessor":
+            workflow[node_id]["inputs"]["resolution"] = max(width, height)
+
+        # Update ImageScale dimensions for pose image
+        if class_type == "ImageScale":
+            title = node.get("_meta", {}).get("title", "").lower()
+            if "pose" in title or "scale" in title:
+                workflow[node_id]["inputs"]["width"] = width
+                workflow[node_id]["inputs"]["height"] = height
 
     return workflow
 
@@ -102,13 +130,20 @@ def update_workflow_params(
     seed: int = None,
 ) -> dict:
     """Update generation parameters in workflow."""
-    
+
     # Qwen Generator and other sampling nodes
     generation_classes = [
         "RH_Qwen_Generator",
         "KSampler",
         "KSamplerAdvanced",
-        "WanVideoSampler" 
+        "WanVideoSampler"
+    ]
+
+    # Empty latent classes
+    latent_classes = [
+        "EmptyQwenImageLayeredLatentImage",
+        "EmptySD3LatentImage",
+        "EmptyLatentImage",
     ]
 
     for node_id, node in workflow.items():
@@ -118,6 +153,7 @@ def update_workflow_params(
         class_type = node.get("class_type", "")
         inputs = node.get("inputs", {})
 
+        # Update sampler/generator nodes
         if class_type in generation_classes:
             if width is not None and "width" in inputs:
                 workflow[node_id]["inputs"]["width"] = width
@@ -130,6 +166,13 @@ def update_workflow_params(
             if seed is not None and seed > 0 and "seed" in inputs:
                 workflow[node_id]["inputs"]["seed"] = seed
 
+        # Update empty latent nodes
+        if class_type in latent_classes:
+            if width is not None and "width" in inputs:
+                workflow[node_id]["inputs"]["width"] = width
+            if height is not None and "height" in inputs:
+                workflow[node_id]["inputs"]["height"] = height
+
     return workflow
 
 
@@ -138,6 +181,8 @@ def generate_image(
     output_path: str,
     style_ref: str | None = None,
     reference_image: str | None = None,
+    pose_image: str | None = None,
+    control_strength: float = 0.9,
     width: int = 832,
     height: int = 480,
     seed: int = 0,
@@ -155,6 +200,8 @@ def generate_image(
         output_path: Path to save the generated image
         style_ref: Optional path to style configuration JSON
         reference_image: Optional reference image for editing/consistency
+        pose_image: Optional pose reference image (uses ControlNet for pose guidance)
+        control_strength: ControlNet strength for pose guidance (default: 0.9)
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
@@ -198,6 +245,15 @@ def generate_image(
     if workflow_path:
         wf_path = Path(workflow_path)
         print_status("Using custom workflow")
+    elif pose_image and reference_image:
+        # Pose-guided generation with character reference
+        if POSE_WORKFLOW.exists():
+            wf_path = POSE_WORKFLOW
+            print_status("Using Qwen + ControlNet pose workflow (pose-guided with reference)")
+        else:
+            print_status("Pose workflow not found!", "error")
+            print_status("Run setup_comfyui.py to install ControlNet support", "error")
+            sys.exit(1)
     elif reference_image:
         if EDIT_WORKFLOW.exists():
             wf_path = EDIT_WORKFLOW
@@ -243,10 +299,28 @@ def generate_image(
             print_status(f"Failed to upload reference image: {e}", "error")
             sys.exit(1)
 
+    # Upload pose image if provided
+    uploaded_pose_name = None
+    if pose_image:
+        if not Path(pose_image).exists():
+            print_status(f"Pose image not found: {pose_image}", "error")
+            sys.exit(1)
+
+        print_status(f"Uploading pose image: {pose_image}", "progress")
+        try:
+            upload_result = client.upload_image(pose_image)
+            uploaded_pose_name = upload_result.get('name', str(upload_result))
+            print_status(f"Pose uploaded as: {uploaded_pose_name}")
+            print_status(f"ControlNet strength: {control_strength}")
+        except Exception as e:
+            print_status(f"Failed to upload pose image: {e}", "error")
+            sys.exit(1)
+
     # Update workflow
     workflow = update_workflow_prompts(workflow, enhanced_prompt)
-    if uploaded_ref_name:
-        workflow = update_workflow_images(workflow, uploaded_ref_name)
+    workflow = update_workflow_images(workflow, uploaded_ref_name, uploaded_pose_name)
+    if uploaded_pose_name:
+        workflow = update_workflow_controlnet(workflow, control_strength, width, height)
     workflow = update_workflow_params(
         workflow,
         width=width,
@@ -329,6 +403,17 @@ def main():
         help="Reference image path for Editing/Consistency"
     )
     parser.add_argument(
+        "--pose", "-P",
+        dest="pose_image",
+        help="Pose reference image (extracts skeleton for pose-guided generation)"
+    )
+    parser.add_argument(
+        "--control-strength",
+        type=float,
+        default=0.9,
+        help="ControlNet strength for pose guidance (default: 0.9)"
+    )
+    parser.add_argument(
         "--width", "-W",
         type=int,
         default=832,
@@ -382,6 +467,8 @@ def main():
         output_path=args.output,
         style_ref=args.style_ref,
         reference_image=args.reference_image,
+        pose_image=args.pose_image,
+        control_strength=args.control_strength,
         width=args.width,
         height=args.height,
         seed=args.seed,
