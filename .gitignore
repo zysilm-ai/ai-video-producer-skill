@@ -1,6 +1,12 @@
 # Claude Code
 .claude
 
+# ComfyUI installation (local to repository)
+comfyui/
+
+# Temp folder (previous implementation backup)
+temp/
+
 # Output files
 outputs/
 
