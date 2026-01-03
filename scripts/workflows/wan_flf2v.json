@@ -3,7 +3,7 @@
     "class_type": "UnetLoaderGGUF",
     "_meta": {"title": "Load GGUF Model"},
     "inputs": {
-      "unet_name": "wan2.2_i2v_low_noise_14B_Q4_K_M.gguf"
+      "unet_name": "wan2.1-i2v-14b-480p-Q4_K_M.gguf"
     }
   },
   "2": {
