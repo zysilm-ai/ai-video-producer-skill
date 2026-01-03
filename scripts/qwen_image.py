@@ -42,12 +42,15 @@ QWEN_LIGHTNING_LORA = "lightx2v/Qwen-Image-Edit-2511-Lightning"
 QWEN_LIGHTNING_LORA_FILENAME = "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
 
 # GGUF quantized models (for low VRAM)
+# Source: https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF
 QWEN_GGUF_REPO = "unsloth/Qwen-Image-Edit-2511-GGUF"
 QWEN_GGUF_VARIANTS = {
-    "q2_k": "qwen-image-edit-2511-Q2_K.gguf",      # 7.2GB, ~4-5GB VRAM
-    "q3_k_m": "qwen-image-edit-2511-Q3_K_M.gguf",  # 9.7GB, ~5-6GB VRAM
-    "q4_k_m": "qwen-image-edit-2511-Q4_K_M.gguf",  # 13.1GB, ~7-8GB VRAM
-    "q8_0": "qwen-image-edit-2511-Q8_0.gguf",      # 21.8GB, ~12GB VRAM
+    "q2_k": "qwen-image-edit-2511-Q2_K.gguf",      # 7.2GB file - fastest, lowest quality
+    "q3_k_m": "qwen-image-edit-2511-Q3_K_M.gguf",  # 9.7GB file
+    "q4_k_m": "qwen-image-edit-2511-Q4_K_M.gguf",  # 13.1GB file
+    "q5_k_m": "qwen-image-edit-2511-Q5_K_M.gguf",  # 15GB file
+    "q6_k": "qwen-image-edit-2511-Q6_K.gguf",      # 16.8GB file - recommended balance
+    "q8_0": "qwen-image-edit-2511-Q8_0.gguf",      # 21.8GB file - highest quality
 }
 
 # Resolution presets for different VRAM levels
@@ -81,7 +84,8 @@ def load_qwen_pipeline(
     if use_controlnet:
         cache_key = "qwen_controlnet"
     elif gguf_variant:
-        cache_key = f"qwen_gguf_{gguf_variant}"
+        lightning_suffix = "_lightning" if use_lightning else ""
+        cache_key = f"qwen_gguf_{gguf_variant}{lightning_suffix}"
     elif use_lightning:
         cache_key = "qwen_lightning"
     else:
@@ -118,10 +122,11 @@ def load_qwen_pipeline(
 
     elif gguf_variant and gguf_variant in QWEN_GGUF_VARIANTS:
         # Load GGUF quantized model for low VRAM
-        from diffusers import QwenImageEditPlusPipeline, QwenImageTransformer2DModel, GGUFQuantizationConfig
+        from diffusers import QwenImageEditPlusPipeline, QwenImageTransformer2DModel, GGUFQuantizationConfig, FlowMatchEulerDiscreteScheduler
 
         gguf_filename = QWEN_GGUF_VARIANTS[gguf_variant]
-        print_status(f"Loading Qwen GGUF ({gguf_variant.upper()})...", "progress")
+        lightning_label = " + Lightning" if use_lightning else ""
+        print_status(f"Loading Qwen GGUF ({gguf_variant.upper()}{lightning_label})...", "progress")
 
         # Download GGUF file from unsloth
         gguf_path = hf_hub_download(
@@ -140,16 +145,60 @@ def load_qwen_pipeline(
             subfolder="transformer",
         )
 
-        # Load pipeline with quantized transformer
-        pipe = QwenImageEditPlusPipeline.from_pretrained(
-            QWEN_EDIT_MODEL,
-            transformer=transformer,
-            torch_dtype=torch.bfloat16,
-        )
+        # Custom scheduler config for Lightning LoRA (required for 4-step generation)
+        if use_lightning:
+            scheduler_config = {
+                "base_image_seq_len": 256,
+                "base_shift": math.log(3),
+                "invert_sigmas": False,
+                "max_image_seq_len": 8192,
+                "max_shift": math.log(3),
+                "num_train_timesteps": 1000,
+                "shift": 1.0,
+                "shift_terminal": None,
+                "stochastic_sampling": False,
+                "time_shift_type": "exponential",
+                "use_beta_sigmas": False,
+                "use_dynamic_shifting": True,
+                "use_exponential_sigmas": False,
+                "use_karras_sigmas": False,
+            }
+            scheduler = FlowMatchEulerDiscreteScheduler.from_config(scheduler_config)
 
-        # Keep model fully on GPU for speed (Q2_K ~7GB fits in 10GB VRAM)
-        pipe.to("cuda")
-        print_status(f"Qwen GGUF pipeline loaded on GPU ({gguf_variant.upper()})", "success")
+            # Load pipeline with quantized transformer and Lightning scheduler
+            pipe = QwenImageEditPlusPipeline.from_pretrained(
+                QWEN_EDIT_MODEL,
+                transformer=transformer,
+                scheduler=scheduler,
+                torch_dtype=torch.bfloat16,
+            )
+        else:
+            # Load pipeline with quantized transformer (standard scheduler)
+            pipe = QwenImageEditPlusPipeline.from_pretrained(
+                QWEN_EDIT_MODEL,
+                transformer=transformer,
+                torch_dtype=torch.bfloat16,
+            )
+
+        # Load Lightning LoRA for fast 4-step generation
+        if use_lightning:
+            print_status("Loading Lightning distillation LoRA...", "progress")
+            try:
+                pipe.load_lora_weights(
+                    QWEN_LIGHTNING_LORA,
+                    weight_name=QWEN_LIGHTNING_LORA_FILENAME,
+                )
+                print_status("Lightning LoRA loaded (4-step mode)", "success")
+            except Exception as e:
+                print_status(f"Warning: Could not load Lightning LoRA: {e}", "warning")
+                print_status("Using base model (slower, more steps needed)", "warning")
+
+        # Use CPU offloading - keeps quantized transformer on GPU during inference,
+        # offloads VAE/text_encoder to RAM when not in use. This is required for
+        # 10GB VRAM systems since VAE+text_encoder are still BF16 (~10-15GB).
+        # Note: enable_sequential_cpu_offload() is NOT compatible with GGUF.
+        pipe.enable_model_cpu_offload()
+        print_status(f"Qwen GGUF pipeline loaded with CPU offload ({gguf_variant.upper()}{lightning_label})", "success")
 
     else:
         from diffusers import QwenImageEditPlusPipeline, FlowMatchEulerDiscreteScheduler
@@ -224,7 +273,8 @@ def generate_image(
     cfg: float = 4.0,
     shift: float = 5.0,
     resolution_preset: Optional[str] = None,
-    gguf_variant: Optional[str] = "q2_k",
+    gguf_variant: Optional[str] = "q6_k",
+    use_lightning: bool = True,
     timeout: int = 300,
 ) -> str:
     """
@@ -240,11 +290,12 @@ def generate_image(
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
-        steps: Number of sampling steps (default 20)
+        steps: Number of sampling steps (default 20, use 4 with Lightning)
         cfg: Guidance scale (default 4.0)
         shift: Flow matching shift parameter (default 5.0, range 3.0-8.0)
         resolution_preset: Resolution preset ("low", "medium", "high")
-        gguf_variant: GGUF quantization variant ("q2_k", "q3_k_m", "q4_k_m", "q8_0", or None for BF16)
+        gguf_variant: GGUF quantization variant ("q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", or None for BF16)
+        use_lightning: Use Lightning LoRA for fast 4-step generation (default: True)
         timeout: Maximum time to wait for generation (unused in diffusers, kept for compatibility)
 
     Returns:
@@ -281,8 +332,14 @@ def generate_image(
     # Load pipeline
     pipe = load_qwen_pipeline(
         use_controlnet=use_controlnet,
+        use_lightning=use_lightning,
         gguf_variant=gguf_variant if not use_controlnet else None,
     )
+
+    # Auto-adjust steps for Lightning mode (4-step distillation)
+    if use_lightning and steps > 4:
+        print_status(f"Lightning mode: reducing steps from {steps} to 4")
+        steps = 4
 
     # Set up generator for reproducibility
     device = get_device()
@@ -459,9 +516,21 @@ def main():
     parser.add_argument(
         "--gguf",
         dest="gguf_variant",
-        choices=["q2_k", "q3_k_m", "q4_k_m", "q8_0", "none"],
-        default="q2_k",
-        help="GGUF quantization variant (default: q2_k ~7GB, fits 10GB VRAM; use 'none' for BF16)"
+        choices=["q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", "none"],
+        default="q6_k",
+        help="GGUF quantization variant (default: q6_k ~17GB file, best quality/speed balance; use 'none' for BF16)"
+    )
+    parser.add_argument(
+        "--lightning",
+        action="store_true",
+        default=True,
+        help="Use Lightning LoRA for fast 4-step generation (default: enabled)"
+    )
+    parser.add_argument(
+        "--no-lightning",
+        dest="lightning",
+        action="store_false",
+        help="Disable Lightning LoRA (use full 20-step generation)"
     )
     parser.add_argument(
         "--shift",
@@ -496,6 +565,7 @@ def main():
         shift=args.shift,
         resolution_preset=args.preset,
         gguf_variant=gguf_variant,
+        use_lightning=args.lightning,
         timeout=args.timeout,
     )
 

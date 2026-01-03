@@ -49,6 +49,19 @@ OPTIONAL_MODELS = [
     ("InstantX/Qwen-Image-ControlNet-Union", "Qwen ControlNet Union (for pose mode)"),
 ]
 
+# GGUF quantized models for low VRAM (10GB) systems
+# Source: https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF
+QWEN_GGUF_REPO = "unsloth/Qwen-Image-Edit-2511-GGUF"
+QWEN_GGUF_VARIANTS = {
+    "q2_k": ("qwen-image-edit-2511-Q2_K.gguf", 7.2, "fastest, lowest quality"),
+    "q3_k_m": ("qwen-image-edit-2511-Q3_K_M.gguf", 9.7, ""),
+    "q4_k_m": ("qwen-image-edit-2511-Q4_K_M.gguf", 13.1, ""),
+    "q5_k_m": ("qwen-image-edit-2511-Q5_K_M.gguf", 15.0, ""),
+    "q6_k": ("qwen-image-edit-2511-Q6_K.gguf", 16.8, "recommended balance"),
+    "q8_0": ("qwen-image-edit-2511-Q8_0.gguf", 21.8, "highest quality"),
+}
+DEFAULT_GGUF_VARIANT = "q6_k"
+
 
 def print_status(message: str, status: str = "info") -> None:
     """Print formatted status message."""
@@ -134,7 +147,38 @@ def check_dependencies():
     return all_ok
 
 
-def download_models(models: list = None, include_optional: bool = False):
+def download_gguf(variant: str = None):
+    """Download GGUF quantized model for low VRAM systems."""
+    from huggingface_hub import hf_hub_download
+
+    if variant is None:
+        variant = DEFAULT_GGUF_VARIANT
+
+    if variant not in QWEN_GGUF_VARIANTS:
+        print_status(f"Unknown GGUF variant: {variant}", "error")
+        print_status(f"Available: {', '.join(QWEN_GGUF_VARIANTS.keys())}", "info")
+        return None
+
+    filename, size_gb, description = QWEN_GGUF_VARIANTS[variant]
+    desc_suffix = f" ({description})" if description else ""
+
+    print_status(f"Downloading GGUF {variant.upper()}{desc_suffix}...", "progress")
+    print_status(f"    File: {QWEN_GGUF_REPO}/{filename} (~{size_gb}GB)", "info")
+
+    try:
+        path = hf_hub_download(
+            repo_id=QWEN_GGUF_REPO,
+            filename=filename,
+            resume_download=True,
+        )
+        print_status(f"    Downloaded to: {path}", "success")
+        return path
+    except Exception as e:
+        print_status(f"    Failed: {e}", "error")
+        return None
+
+
+def download_models(models: list = None, include_optional: bool = False, gguf_variant: str = None):
     """Pre-download models from HuggingFace."""
     from huggingface_hub import snapshot_download, hf_hub_download, HfFolder
 
@@ -153,7 +197,10 @@ def download_models(models: list = None, include_optional: bool = False):
         if include_optional:
             models.extend(OPTIONAL_MODELS)
 
+    # Count total downloads (models + LoRAs + GGUF if specified)
     total = len(models) + len(LORA_FILES)
+    if gguf_variant:
+        total += 1
     idx = 0
 
     # Download full model repositories
@@ -180,6 +227,24 @@ def download_models(models: list = None, include_optional: bool = False):
         try:
             path = hf_hub_download(
                 repo_id=repo_id,
+                filename=filename,
+                resume_download=True,
+            )
+            print_status(f"    Downloaded to: {path}", "success")
+        except Exception as e:
+            print_status(f"    Failed: {e}", "error")
+
+    # Download GGUF if specified
+    if gguf_variant:
+        idx += 1
+        filename, size_gb, description = QWEN_GGUF_VARIANTS.get(gguf_variant, (None, 0, ""))
+        desc_suffix = f" ({description})" if description else ""
+        print_status(f"[{idx}/{total}] Downloading: Qwen GGUF {gguf_variant.upper()}{desc_suffix}...", "progress")
+        print_status(f"    File: {QWEN_GGUF_REPO}/{filename} (~{size_gb}GB)", "info")
+
+        try:
+            path = hf_hub_download(
+                repo_id=QWEN_GGUF_REPO,
                 filename=filename,
                 resume_download=True,
             )
@@ -316,6 +381,18 @@ def main():
         help="Download required + optional models"
     )
     parser.add_argument(
+        "--gguf",
+        dest="gguf_variant",
+        choices=list(QWEN_GGUF_VARIANTS.keys()),
+        default=None,
+        help=f"Download GGUF quantized Qwen model for low VRAM (default: {DEFAULT_GGUF_VARIANT} if --download used)"
+    )
+    parser.add_argument(
+        "--no-gguf",
+        action="store_true",
+        help="Skip GGUF download even with --download"
+    )
+    parser.add_argument(
         "--info",
         action="store_true",
         help="Show download size estimates"
@@ -325,11 +402,18 @@ def main():
 
     if args.info:
         required, optional = estimate_download_size()
+        gguf_size = QWEN_GGUF_VARIANTS[DEFAULT_GGUF_VARIANT][1]
         print("\n=== Download Size Estimates ===\n")
         print(f"Required models: ~{required:.1f}GB")
+        print(f"GGUF {DEFAULT_GGUF_VARIANT.upper()} (recommended): ~{gguf_size:.1f}GB")
         print(f"Optional models: ~{optional:.1f}GB")
-        print(f"Total (all):     ~{required + optional:.1f}GB")
+        print(f"Total (all):     ~{required + optional + gguf_size:.1f}GB")
         print(f"\nModels will be stored in: {MODELS_DIR}")
+        print("\nGGUF variants available:")
+        for variant, (filename, size, desc) in QWEN_GGUF_VARIANTS.items():
+            suffix = f" - {desc}" if desc else ""
+            marker = " (default)" if variant == DEFAULT_GGUF_VARIANT else ""
+            print(f"  {variant}: ~{size:.1f}GB{suffix}{marker}")
         return
 
     if args.check:
@@ -343,7 +427,12 @@ def main():
             print("  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124")
             sys.exit(1)
 
-        download_models(include_optional=args.download_all)
+        # Determine GGUF variant to download
+        gguf_variant = None
+        if not args.no_gguf:
+            gguf_variant = args.gguf_variant or DEFAULT_GGUF_VARIANT
+
+        download_models(include_optional=args.download_all, gguf_variant=gguf_variant)
         validate_setup()
         return
 
