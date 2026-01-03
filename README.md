@@ -1,6 +1,6 @@
 # AI Video Producer Skill
 
-A Claude Code skill for complete AI video production workflows using **WAN 2.2** video generation and **Qwen Image Edit 2511** keyframe generation via **ComfyUI**. Runs entirely locally on consumer GPUs (RTX 3080+).
+A Claude Code skill for complete AI video production workflows using **WAN 2.2** video generation and **Qwen Image Edit 2511** keyframe generation via **HuggingFace diffusers**. Runs entirely locally on consumer GPUs (RTX 3080+ with 10GB+ VRAM).
 
 ## Overview
 
@@ -47,8 +47,8 @@ The philosophy-first approach ensures visual coherence across all scenes, result
 ### With Claude Code (Recommended)
 
 Simply describe what video you want to create. Claude will automatically:
-- Check and run setup if needed (downloads ~33GB of models on first run)
-- Start ComfyUI server
+- Check and run setup if needed (downloads ~50GB of models on first run)
+- Load models as needed (cached for subsequent runs)
 - Guide you through the production workflow
 - Generate keyframes and videos
 
@@ -75,38 +75,30 @@ For using the scripts without Claude Code.
 ```bash
 cd gemini-video-producer-skill
 
-# Full automatic setup (~33GB download)
-python scripts/setup_comfyui.py
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install PyTorch with CUDA
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
 # Check setup status
-python scripts/setup_comfyui.py --check
+python scripts/setup_diffusers.py --check
+
+# Download required models (~50GB)
+python scripts/setup_diffusers.py --download
 ```
 
-This will:
-1. Clone ComfyUI
-2. Install custom nodes (ComfyUI-GGUF, ComfyUI_RH_Qwen-Image, comfyui_controlnet_aux, etc.)
-3. Download WAN 2.2 GGUF model (~8.5GB)
-4. Download UMT5-XXL text encoder (~4.9GB)
-5. Download WAN VAE (~0.2GB)
-6. Download LightX2V distillation LoRA (~0.7GB)
-7. Download Qwen Image Edit 2511 model (~12GB)
-8. Download Qwen VL text encoder (~7.5GB)
-9. Download Qwen VAE (~0.2GB)
-10. Download ControlNet Union for pose guidance (~3.5GB)
+This downloads from HuggingFace:
+1. WAN 2.2 I2V 14B model (~28GB)
+2. LightX2V distillation LoRA (~0.7GB)
+3. Qwen Image Edit 2511 (~20GB)
+4. (Optional) ControlNet Union for pose guidance (~3.5GB)
+
+Models are cached in `~/.cache/huggingface/` and reused across runs.
 
 See [SETUP.md](SETUP.md) for detailed manual installation instructions.
 
-#### 2. Start ComfyUI Server
-
-```bash
-# Using setup script
-python scripts/setup_comfyui.py --start
-
-# Or manually
-cd D:/ComfyUI && python main.py --listen 0.0.0.0 --port 8188
-```
-
-#### 3. Generate Keyframe Image
+#### 2. Generate Keyframe Image
 
 ```bash
 python scripts/qwen_image.py \
@@ -115,7 +107,7 @@ python scripts/qwen_image.py \
   --preset medium
 ```
 
-#### 4. Generate Video (Image-to-Video)
+#### 3. Generate Video (Image-to-Video)
 
 ```bash
 python scripts/wan_video.py \
@@ -125,7 +117,7 @@ python scripts/wan_video.py \
   --preset medium
 ```
 
-#### 5. Generate Video (First-Last-Frame)
+#### 4. Generate Video (First-Last-Frame)
 
 ```bash
 python scripts/wan_video.py \
@@ -145,39 +137,35 @@ python scripts/wan_video.py \
 
 ## Architecture
 
-### Workflow Pipeline
+### Diffusers Pipeline
+
+The skill uses HuggingFace diffusers for direct Python inference without a server:
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Prompt    │────▶│  Text Enc   │────▶│   CLIP      │
-│   (user)    │     │  (UMT5-XXL) │     │  Encode     │
-└─────────────┘     └─────────────┘     └──────┬──────┘
-                                               │
-┌─────────────┐     ┌─────────────┐            │
-│   Image     │────▶│   Scale &   │────────────┤
-│   (keyframe)│     │   Encode    │            │
-└─────────────┘     └─────────────┘            │
-                                               ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  GGUF Model │────▶│  LightX2V   │────▶│  KSampler   │
-│  (WAN 2.2)  │     │    LoRA     │     │  (8 steps)  │
-└─────────────┘     └─────────────┘     └──────┬──────┘
-                                               │
-                                               ▼
-                                        ┌─────────────┐
-                                        │ VAE Decode  │
-                                        │  + Video    │
-                                        └─────────────┘
+┌─────────────┐     ┌─────────────────────────────────────┐
+│   Prompt    │────▶│  WanImageToVideoPipeline            │
+│   (user)    │     │  ├─ Text Encoder (T5-XXL)           │
+└─────────────┘     │  ├─ Transformer (WAN 2.2 14B)       │
+                    │  ├─ LightX2V LoRA (8-step distill)  │
+┌─────────────┐     │  └─ VAE Decoder                     │
+│   Image     │────▶│                                     │
+│   (keyframe)│     └──────────────┬──────────────────────┘
+└─────────────┘                    │
+                                   ▼
+                            ┌─────────────┐
+                            │   Video     │
+                            │  (81 frames)│
+                            └─────────────┘
 ```
 
 ### Key Components
 
-| Component | Model | Purpose |
-|-----------|-------|---------|
-| Video Model | WAN 2.2 I2V (GGUF Q4_K_M) | 14B parameter video generation |
-| Text Encoder | UMT5-XXL (FP8) | Text understanding |
-| Distillation LoRA | LightX2V rank64 | Enables 8-step generation |
-| VAE | WAN 2.1 VAE | Latent encoding/decoding |
+| Component | HuggingFace Model | Purpose |
+|-----------|-------------------|---------|
+| Video Pipeline | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | 14B MoE video generation |
+| Distillation LoRA | `lightx2v/Wan2.1-I2V-14B-480P-StepDistill...` | Enables 8-step generation |
+| Image Pipeline | `Qwen/Qwen-Image-Edit-2511` | Keyframe generation |
+| ControlNet | `InstantX/Qwen-Image-ControlNet-Union` | Pose-guided generation |
 
 ### Generation Settings
 
@@ -185,33 +173,24 @@ python scripts/wan_video.py \
 |---------|-------|-------|
 | Steps | 8 | With LightX2V LoRA |
 | CFG | 1.0 | Guidance baked into LoRA |
-| Sampler | uni_pc | Fast, stable |
-| Scheduler | simple | |
 | LoRA Strength | 1.25 | Optimized for I2V |
 | Resolution | Up to 832x480 | Adjustable presets |
 | Frame Rate | 16 fps | ~5 sec per clip |
 
 ### Model Locations
 
-After setup, models are stored in:
+Models are stored in the `models/` directory within this repository (gitignored):
 
 ```
-ComfyUI/models/
-├── diffusion_models/
-│   └── wan2.2_i2v_low_noise_14B_Q4_K_M.gguf
-├── unet/
-│   └── qwen_image_edit_2511_fp8mixed.safetensors
-├── clip/
-│   ├── umt5_xxl_fp8_e4m3fn_scaled.safetensors
-│   └── qwen_2.5_vl_7b_fp8_scaled.safetensors
-├── vae/
-│   ├── wan_2.1_vae.safetensors
-│   └── qwen_image_vae.safetensors
-├── controlnet/
-│   └── Qwen-Image-InstantX-ControlNet-Union.safetensors
-└── loras/
-    └── Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors
+gemini-video-producer-skill/
+└── models/
+    └── hub/
+        ├── models--Wan-AI--Wan2.2-I2V-A14B-Diffusers/
+        ├── models--Qwen--Qwen-Image-Edit-2511/
+        └── models--lightx2v--Wan2.1-I2V-14B-480P-StepDistill.../
 ```
+
+This keeps models local to the project and avoids filling your system drive.
 
 ## Script Reference
 
@@ -281,15 +260,16 @@ python scripts/qwen_image.py \
   --output keyframe-end.png
 ```
 
-### setup_comfyui.py
+### setup_diffusers.py
 
-Setup and manage ComfyUI installation.
+Setup and download models from HuggingFace.
 
 ```bash
-python scripts/setup_comfyui.py              # Full setup
-python scripts/setup_comfyui.py --check      # Check status
-python scripts/setup_comfyui.py --start      # Start server
-python scripts/setup_comfyui.py --models     # Download models only
+python scripts/setup_diffusers.py              # Check setup status
+python scripts/setup_diffusers.py --check      # Validate setup
+python scripts/setup_diffusers.py --download   # Download required models
+python scripts/setup_diffusers.py --download-all  # Download all models (including optional)
+python scripts/setup_diffusers.py --info       # Show download size estimates
 ```
 
 ## Directory Structure
@@ -301,16 +281,12 @@ gemini-video-producer-skill/
 ├── SETUP.md                 # Detailed setup guide
 ├── requirements.txt         # Python dependencies
 ├── scripts/
-│   ├── wan_video.py         # Video generation (WAN 2.2)
-│   ├── qwen_image.py        # Keyframe generation (Qwen Image Edit 2511)
-│   ├── setup_comfyui.py     # Auto-setup script
-│   ├── comfyui_client.py    # ComfyUI API client
-│   └── workflows/
-│       ├── wan_i2v.json     # Image-to-Video workflow
-│       ├── wan_flf2v.json   # First-Last-Frame workflow
-│       ├── qwen_t2i.json    # Qwen Text-to-Image workflow
-│       ├── qwen_edit.json   # Qwen Edit workflow
-│       └── qwen_pose.json   # Qwen Pose-guided workflow
+│   ├── wan_video.py         # Video generation (WAN 2.2 via diffusers)
+│   ├── qwen_image.py        # Keyframe generation (Qwen via diffusers)
+│   ├── setup_diffusers.py   # Model download and setup
+│   ├── validate_diffusers.py # Setup validation
+│   ├── diffusers_utils.py   # Shared utilities for diffusers
+│   └── utils.py             # General utilities
 ├── references/
 │   ├── prompt-engineering.md
 │   ├── style-systems.md
@@ -320,41 +296,16 @@ gemini-video-producer-skill/
 └── outputs/                 # Generated content
 ```
 
-## Workflow JSON Structure
-
-The video generation uses optimized ComfyUI workflows:
-
-### Image-to-Video (wan_i2v.json)
-
-```
-UnetLoaderGGUF → ModelSamplingSD3 → LoraLoader (LightX2V)
-                                          ↓
-CLIPLoader → CLIPTextEncode (pos/neg) → WanImageToVideo
-                                          ↓
-LoadImage → ImageScale → ─────────────────┘
-                                          ↓
-                            KSampler (8 steps, CFG 1.0)
-                                          ↓
-                            VAEDecode → VHS_VideoCombine
-```
-
-### Key Workflow Features
-
-- **LightX2V LoRA**: Enables 8-step generation (vs 20-40 without)
-- **CFG 1.0**: Guidance baked into distillation LoRA
-- **Native nodes**: Uses stable ComfyUI core nodes
-- **GGUF quantization**: Reduces VRAM from 24GB to 10GB
-
 ## Troubleshooting
 
-### ComfyUI Not Running
+### Models Not Found
 
 ```bash
-# Check if ComfyUI is accessible
-python scripts/comfyui_client.py
+# Check setup status
+python scripts/setup_diffusers.py --check
 
-# Start ComfyUI
-python scripts/setup_comfyui.py --start
+# Download missing models
+python scripts/setup_diffusers.py --download
 ```
 
 ### Out of VRAM
@@ -364,18 +315,24 @@ Use lower resolution preset:
 python scripts/wan_video.py --preset low ...
 ```
 
+The diffusers pipeline automatically applies memory optimization based on available VRAM:
+- **<8GB**: Sequential CPU offloading
+- **8-12GB**: Model CPU offloading
+- **12-16GB**: Attention slicing
+- **16GB+**: Full GPU inference
+
 ### Slow Generation
 
 Ensure LightX2V LoRA is loaded (check setup):
 ```bash
-python scripts/setup_comfyui.py --check
+python scripts/validate_diffusers.py --detailed
 ```
 
 ### Poor Quality
 
-- Verify CFG is 1.0 (not 5.0)
+- Verify CFG is 1.0 (not higher)
 - Verify LoRA strength is 1.25
-- Check that LightX2V LoRA is installed
+- Check that models are fully downloaded
 
 See [references/troubleshooting.md](references/troubleshooting.md) for more solutions.
 
@@ -393,8 +350,8 @@ See [references/troubleshooting.md](references/troubleshooting.md) for more solu
 
 The fast generation is made possible by:
 - [LightX2V](https://huggingface.co/lightx2v) - Step/CFG distillation LoRA
-- [CGPixel](https://www.patreon.com/cgpixel) - Optimized ComfyUI workflows
-- [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) - GGUF model support
+- [HuggingFace Diffusers](https://github.com/huggingface/diffusers) - Unified inference library
+- [Wan-AI](https://github.com/Wan-Video/Wan2.2) - WAN 2.2 video model
 
 ## Contributing
 
@@ -411,7 +368,7 @@ MIT License - See LICENSE.txt
 
 ## Acknowledgments
 
-- WAN 2.2 model by Alibaba
+- WAN 2.2 model by Wan-AI
 - LightX2V distillation by lightx2v team
-- CGPixel for workflow optimization techniques
-- ComfyUI community for excellent tooling
+- Qwen Image Edit by Alibaba Qwen team
+- HuggingFace diffusers team for the inference library

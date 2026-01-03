@@ -1,6 +1,6 @@
-# Setup Guide: WAN 2.2 Video + Qwen Image Edit 2511
+# Setup Guide: WAN 2.2 Video + Qwen Image Edit 2511 (Diffusers)
 
-This guide covers setting up the local environment for AI video generation using WAN 2.2 GGUF models and Qwen Image Edit 2511 for keyframes via ComfyUI.
+This guide covers setting up the local environment for AI video generation using WAN 2.2 and Qwen Image Edit 2511 via HuggingFace diffusers.
 
 ## System Requirements
 
@@ -9,211 +9,167 @@ This guide covers setting up the local environment for AI video generation using
 | GPU | RTX 3060 12GB | RTX 3080 10GB+ |
 | VRAM | 10GB | 12GB+ |
 | RAM | 16GB | 32GB |
-| Storage | 50GB free | 100GB+ free |
+| Storage | 60GB free | 100GB+ free |
 | OS | Windows 10/11, Linux | Ubuntu 22.04+ |
+| Python | 3.10+ | 3.11 |
 
-## Step 1: Install ComfyUI
+---
 
-### Option A: Standalone (Recommended)
+## Quick Setup (Automatic)
 
 ```bash
-# Clone ComfyUI
-git clone https://github.com/comfyanonymous/ComfyUI.git
-cd ComfyUI
+cd gemini-video-producer-skill
 
-# Create virtual environment
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install PyTorch with CUDA 12.4
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# Check setup and download models
+python scripts/setup_diffusers.py --download
+```
+
+That's it! The setup script will download all required models from HuggingFace.
+
+---
+
+## Step-by-Step Setup
+
+### Step 1: Install Python Dependencies
+
+```bash
+# Create virtual environment (recommended)
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 # or: venv\Scripts\activate  # Windows
 
-# Install dependencies
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# Install base requirements
 pip install -r requirements.txt
 ```
 
-### Option B: Using comfy-cli
+### Step 2: Install PyTorch with CUDA
+
+Choose the appropriate command for your CUDA version:
 
 ```bash
-pip install comfy-cli
-comfy install
+# CUDA 12.4 (recommended)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# CUDA 12.1
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# CUDA 11.8
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
 
-### Start ComfyUI
+### Step 3: Verify CUDA
 
 ```bash
-python main.py --listen 0.0.0.0 --port 8188
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')"
 ```
 
-Verify it's running by visiting: http://localhost:8188
-
----
-
-## Step 2: Install Required Custom Nodes
-
-### Via ComfyUI Manager (Recommended)
-
-1. Install ComfyUI Manager:
-```bash
-cd ComfyUI/custom_nodes
-git clone https://github.com/ltdrdata/ComfyUI-Manager.git
+Expected output:
+```
+CUDA available: True
+Device: NVIDIA GeForce RTX 3080
 ```
 
-2. Restart ComfyUI and use the Manager to install:
-   - **ComfyUI-GGUF** (City96) - Required for GGUF models
-   - **ComfyUI-WanVideoWrapper** (Kijai) - WAN model support
-   - **ComfyUI-VideoHelperSuite** - Video export utilities
-   - **ComfyUI_RH_Qwen-Image** - Qwen Image Edit 2511 support
-   - **comfyui_controlnet_aux** - Pose preprocessors for ControlNet
-
-### Manual Installation
+### Step 4: Download Models
 
 ```bash
-cd ComfyUI/custom_nodes
+# Check current status
+python scripts/setup_diffusers.py --check
 
-# GGUF support
-git clone https://github.com/city96/ComfyUI-GGUF.git
+# Download required models (~50GB)
+python scripts/setup_diffusers.py --download
 
-# WAN wrapper
-git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git
-
-# Video utilities
-git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
-
-# Qwen Image Edit support
-git clone https://github.com/Robinyo/ComfyUI_RH_Qwen-Image.git
-
-# ControlNet preprocessors (for pose guidance)
-git clone https://github.com/Fannovel16/comfyui_controlnet_aux.git
-```
-
-Restart ComfyUI after installing nodes.
-
----
-
-## Step 3: Download Models
-
-### 3.1 WAN 2.2 GGUF Models (for Video Generation)
-
-Download from [bullerwins/Wan2.2-I2V-A14B-GGUF](https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF):
-
-For **10GB VRAM**, use Q4_K_M quantization:
-
-```bash
-# Create directories
-mkdir -p ComfyUI/models/diffusion_models
-
-# Download high-noise model
-wget -P ComfyUI/models/diffusion_models/ \
-  https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF/resolve/main/wan2.2_i2v_high_noise_14B_Q4_K_M.gguf
-
-# Download low-noise model
-wget -P ComfyUI/models/diffusion_models/ \
-  https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF/resolve/main/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf
-```
-
-**Alternative quantizations:**
-| Quantization | VRAM | File |
-|--------------|------|------|
-| Q4_K_S | 8.75GB | `*_Q4_K_S.gguf` |
-| Q4_K_M | 9.65GB | `*_Q4_K_M.gguf` |
-| Q5_K_S | 10.1GB | `*_Q5_K_S.gguf` |
-
-### 3.2 Text Encoder
-
-```bash
-mkdir -p ComfyUI/models/clip
-
-# Download UMT5 text encoder (FP8 quantized)
-wget -P ComfyUI/models/clip/ \
-  https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors
-```
-
-### 3.3 VAE
-
-```bash
-mkdir -p ComfyUI/models/vae
-
-# Download WAN VAE
-wget -P ComfyUI/models/vae/ \
-  https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors
-```
-
-### 3.4 Qwen Image Edit 2511 (for Keyframe Generation)
-
-```bash
-mkdir -p ComfyUI/models/unet
-mkdir -p ComfyUI/models/clip
-mkdir -p ComfyUI/models/vae
-
-# Download Qwen Image Edit 2511 model (FP8 mixed)
-wget -P ComfyUI/models/unet/ \
-  https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged/resolve/main/split_files/unet/qwen_image_edit_2511_fp8mixed.safetensors
-
-# Download Qwen VL text encoder
-wget -P ComfyUI/models/clip/ \
-  https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
-
-# Download Qwen VAE
-wget -P ComfyUI/models/vae/ \
-  https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2511_ComfyUI_Repackaged/resolve/main/split_files/vae/qwen_image_vae.safetensors
-```
-
-### 3.5 ControlNet Union (for Pose Guidance)
-
-```bash
-mkdir -p ComfyUI/models/controlnet
-
-# Download Qwen-compatible ControlNet Union
-wget -P ComfyUI/models/controlnet/ \
-  https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets/resolve/main/split_files/controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors
+# Or download all including optional ControlNet (~55GB)
+python scripts/setup_diffusers.py --download-all
 ```
 
 ---
 
-## Step 4: Verify Directory Structure
+## Model Details
 
-After setup, your ComfyUI models folder should look like:
+### Required Models
+
+| Model | HuggingFace ID | Size | Purpose |
+|-------|----------------|------|---------|
+| WAN 2.2 I2V | `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | ~28GB | Video generation |
+| LightX2V LoRA | `lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v` | ~0.7GB | Fast 8-step generation |
+| Qwen Image Edit | `Qwen/Qwen-Image-Edit-2511` | ~20GB | Keyframe generation |
+
+### Optional Models
+
+| Model | HuggingFace ID | Size | Purpose |
+|-------|----------------|------|---------|
+| ControlNet Union | `InstantX/Qwen-Image-ControlNet-Union` | ~3.5GB | Pose-guided generation |
+
+### Model Cache Location
+
+Models are stored in the `models/` directory within this repository:
 
 ```
-ComfyUI/models/
-├── diffusion_models/
-│   └── wan2.2_i2v_low_noise_14B_Q4_K_M.gguf
-├── unet/
-│   └── qwen_image_edit_2511_fp8mixed.safetensors
-├── clip/
-│   ├── umt5_xxl_fp8_e4m3fn_scaled.safetensors
-│   └── qwen_2.5_vl_7b_fp8_scaled.safetensors
-├── vae/
-│   ├── wan_2.1_vae.safetensors
-│   └── qwen_image_vae.safetensors
-├── controlnet/
-│   └── Qwen-Image-InstantX-ControlNet-Union.safetensors
-└── loras/
-    └── Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors
+gemini-video-producer-skill/
+└── models/
+    └── hub/
+        ├── models--Wan-AI--Wan2.2-I2V-A14B-Diffusers/
+        ├── models--Qwen--Qwen-Image-Edit-2511/
+        ├── models--lightx2v--Wan2.1-I2V-14B-480P-StepDistill.../
+        └── models--InstantX--Qwen-Image-ControlNet-Union/
+```
+
+This directory is gitignored and keeps models local to the project.
+
+---
+
+## Verify Installation
+
+```bash
+# Full validation
+python scripts/validate_diffusers.py
+
+# Detailed output
+python scripts/validate_diffusers.py --detailed
+
+# JSON output (for automation)
+python scripts/validate_diffusers.py --json
+```
+
+Expected output:
+```
+[+] Python: 3.11.x
+[+] torch: 2.x.x
+[+] diffusers: 0.31.x
+[+] CUDA: NVIDIA GeForce RTX 3080
+[+] VRAM: 10.0GB
+[+] Qwen Image Edit 2511 (20.5GB)
+[+] WAN 2.2 I2V 14B (28.0GB)
+[+] LightX2V LoRA (0.7GB)
+[+] Setup complete! Ready for generation.
 ```
 
 ---
 
-## Step 5: Test Installation
+## Memory Optimization
 
-### Test ComfyUI API
+The diffusers pipeline automatically optimizes memory usage based on your VRAM:
 
-```python
-import requests
+| VRAM | Optimization Applied | Notes |
+|------|---------------------|-------|
+| <8GB | Sequential CPU offload | Slowest, but works |
+| 8-12GB | Model CPU offload | Good balance |
+| 12-16GB | Attention slicing | Fast |
+| 16GB+ | Full GPU | Fastest |
 
-response = requests.get("http://localhost:8188/system_stats")
-if response.status_code == 200:
-    print("ComfyUI is running!")
-    print(response.json())
-else:
-    print("ComfyUI not accessible")
-```
+You can also use resolution presets:
 
-### Test Model Loading
-
-1. Open ComfyUI web UI: http://localhost:8188
-2. Create a simple workflow with WAN nodes
-3. Verify models load without OOM errors
+| Preset | Resolution | Frames | VRAM Usage |
+|--------|------------|--------|------------|
+| low | 640x384 | 49 | ~8GB |
+| medium | 832x480 | 81 | ~10GB |
+| high | 1280x720 | 81 | ~16GB |
 
 ---
 
@@ -221,63 +177,69 @@ else:
 
 ### Out of Memory (OOM) Errors
 
-1. Use smaller quantization (Q4_K_S instead of Q4_K_M)
-2. Reduce resolution to 480p
-3. Enable `--lowvram` flag when starting ComfyUI:
+1. Use lower resolution preset:
    ```bash
-   python main.py --lowvram --listen 0.0.0.0 --port 8188
+   python scripts/wan_video.py --preset low ...
    ```
 
-### Models Not Found
+2. The pipeline automatically applies offloading, but you can force aggressive mode by reducing VRAM detection.
 
-Ensure models are in correct directories:
-- GGUF models → `models/diffusion_models/`
-- CLIP/Text encoders → `models/clip/`
-- VAE → `models/vae/`
+### Models Not Downloading
 
-### ComfyUI Won't Start
+1. Check internet connection
+2. Try logging in to HuggingFace:
+   ```bash
+   pip install huggingface_hub
+   huggingface-cli login
+   ```
 
-1. Check Python version (3.10-3.12 recommended)
-2. Verify CUDA installation: `python -c "import torch; print(torch.cuda.is_available())"`
-3. Check GPU driver is up to date
+3. Some models may require accepting terms on HuggingFace website first.
+
+### CUDA Not Available
+
+1. Check NVIDIA driver: `nvidia-smi`
+2. Reinstall PyTorch with CUDA:
+   ```bash
+   pip uninstall torch torchvision torchaudio
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+   ```
 
 ### Slow Generation
 
-1. Install xformers: `pip install xformers`
-2. Use sage attention if available
-3. Consider Lightning LoRAs for faster inference
+1. Ensure LightX2V LoRA is loaded (check with `validate_diffusers.py`)
+2. Install xformers for memory-efficient attention:
+   ```bash
+   pip install xformers
+   ```
 
----
+### Import Errors
 
-## Optional: Lightning LoRAs (4x Faster)
-
-For faster generation (4 steps instead of 20+):
-
+Make sure you're using the latest diffusers:
 ```bash
-mkdir -p ComfyUI/models/loras
-
-# Download Lightning LoRA
-wget -P ComfyUI/models/loras/ \
-  https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/wan2.2_i2v_lightning_lora.safetensors
+pip install --upgrade diffusers transformers accelerate
 ```
 
 ---
 
 ## Environment Variables
 
-Set these for the video skill scripts:
+Optional environment variables:
 
 ```bash
-# ComfyUI server address (default)
-export COMFYUI_HOST="127.0.0.1"
-export COMFYUI_PORT="8188"
+# Disable progress bars (for CI/scripts)
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+
+# Offline mode (use only cached models)
+export HF_HUB_OFFLINE=1
 ```
+
+Note: `HF_HOME` is automatically set to `models/` by the scripts.
 
 ---
 
 ## Next Steps
 
 Once setup is complete:
-1. Verify ComfyUI is running on port 8188
-2. Run the video skill to generate videos
-3. Check `references/troubleshooting.md` for common issues
+1. Run `python scripts/validate_diffusers.py` to confirm everything works
+2. Try generating a test image: `python scripts/qwen_image.py --prompt "A beautiful sunset" --output test.png`
+3. Check `references/troubleshooting.md` for additional help

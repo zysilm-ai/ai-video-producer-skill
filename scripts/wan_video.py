@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 """
-Generate videos using WAN 2.2 with LightX2V distillation via ComfyUI.
+Generate videos using WAN 2.2 via HuggingFace diffusers.
 Supports single-frame (I2V) and dual-frame (FLF2V) generation modes.
-
-Uses native ComfyUI nodes with LightX2V distillation LoRA for fast 8-step generation.
+Uses LightX2V distillation LoRA for fast 8-step generation.
 """
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
-from comfyui_client import (
-    ComfyUIClient,
-    ComfyUIError,
-    WorkflowValidationError,
-    load_workflow,
+import torch
+from PIL import Image
+
+from diffusers_utils import (
+    get_device,
+    get_torch_dtype,
+    enable_memory_optimization,
+    create_progress_callback,
+    get_pipeline_from_cache,
+    set_pipeline_cache,
+    clear_vram,
+    print_memory_stats,
 )
 from utils import (
     load_style_config,
@@ -27,187 +33,104 @@ from utils import (
 )
 
 
-# Default workflow paths
-WORKFLOW_DIR = Path(__file__).parent / "workflows"
-I2V_WORKFLOW = WORKFLOW_DIR / "wan_i2v.json"
-FLF2V_WORKFLOW = WORKFLOW_DIR / "wan_flf2v.json"
+# Model IDs
+WAN_I2V_MODEL = "Wan-AI/Wan2.2-I2V-A14B-Diffusers"
+LIGHTX2V_LORA = "lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v"
+LIGHTX2V_LORA_FILENAME = "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors"
 
 # Resolution presets for different VRAM levels
 RESOLUTION_PRESETS = {
-    "low": {"width": 640, "height": 384, "length": 49},     # ~8GB VRAM
-    "medium": {"width": 832, "height": 480, "length": 81},  # ~10GB VRAM
-    "high": {"width": 1280, "height": 720, "length": 81},   # ~16GB+ VRAM
+    "low": {"width": 640, "height": 384, "length": 49},
+    "medium": {"width": 832, "height": 480, "length": 81},
+    "high": {"width": 1280, "height": 720, "length": 81},
 }
 
-# Default model files
-DEFAULT_I2V_MODEL = "wan2.2_i2v_480p_14B_Q4_K_M.gguf"
-DEFAULT_LORA = "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors"
 
+def load_wan_pipeline(use_lora: bool = True):
+    """
+    Load WAN I2V pipeline with caching.
 
-def update_workflow_prompts(workflow: dict, prompt: str, negative_prompt: str = None) -> dict:
-    """Update text prompts in workflow."""
-    default_negative = "blurry, low quality, distorted, deformed, static, poorly drawn, disfigured, ugly, worst quality"
+    Args:
+        use_lora: Whether to load LightX2V distillation LoRA
 
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
+    Returns:
+        Loaded pipeline (cached for reuse)
+    """
+    cache_key = "wan_i2v_lora" if use_lora else "wan_i2v"
 
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-        title = node.get("_meta", {}).get("title", "").lower()
+    # Check cache first
+    cached_pipe = get_pipeline_from_cache(cache_key)
+    if cached_pipe is not None:
+        return cached_pipe
 
-        if class_type == "CLIPTextEncode":
-            current_text = inputs.get("text", "")
+    device = get_device()
+    dtype = get_torch_dtype(device)
 
-            # Check if this is the positive prompt
-            if "{{PROMPT}}" in current_text or "positive" in title:
-                workflow[node_id]["inputs"]["text"] = prompt
-            # Check if this is the negative prompt
-            elif "negative" in title:
-                workflow[node_id]["inputs"]["text"] = negative_prompt or default_negative
+    from diffusers import WanImageToVideoPipeline, AutoencoderKLWan
 
-    return workflow
+    print_status("Loading WAN 2.2 I2V pipeline...", "progress")
 
+    # Load VAE in float32 for numerical stability
+    vae = AutoencoderKLWan.from_pretrained(
+        WAN_I2V_MODEL,
+        subfolder="vae",
+        torch_dtype=torch.float32,
+    )
 
-def update_workflow_images(
-    workflow: dict,
-    start_frame: str = None,
-    end_frame: str = None
-) -> dict:
-    """Update image inputs in workflow."""
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
+    # Load pipeline
+    pipe = WanImageToVideoPipeline.from_pretrained(
+        WAN_I2V_MODEL,
+        vae=vae,
+        torch_dtype=dtype,
+    )
 
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-        title = node.get("_meta", {}).get("title", "").lower()
+    # Load LightX2V LoRA for fast generation
+    if use_lora:
+        print_status("Loading LightX2V distillation LoRA...", "progress")
+        try:
+            pipe.load_lora_weights(
+                LIGHTX2V_LORA,
+                weight_name=LIGHTX2V_LORA_FILENAME,
+            )
+            print_status("LightX2V LoRA loaded", "success")
+        except Exception as e:
+            print_status(f"Warning: Could not load LightX2V LoRA: {e}", "warning")
+            print_status("Using base model (slower, more steps needed)", "warning")
 
-        if class_type == "LoadImage":
-            current_image = str(inputs.get("image", ""))
+    pipe = enable_memory_optimization(pipe)
+    print_status("WAN I2V pipeline loaded", "success")
 
-            # Determine which frame this node expects
-            is_start = any(x in title for x in ["first", "start"]) or "{{START_FRAME}}" in current_image
-            is_end = any(x in title for x in ["last", "end"]) or "{{END_FRAME}}" in current_image
+    # Cache for reuse
+    set_pipeline_cache(cache_key, pipe)
+    print_memory_stats()
 
-            if is_start and start_frame:
-                workflow[node_id]["inputs"]["image"] = start_frame
-            elif is_end and end_frame:
-                workflow[node_id]["inputs"]["image"] = end_frame
-            elif not is_end and start_frame:
-                # Default to start frame if not explicitly end
-                workflow[node_id]["inputs"]["image"] = start_frame
-
-    return workflow
-
-
-def update_workflow_resolution(
-    workflow: dict,
-    width: int = None,
-    height: int = None,
-    length: int = None,
-) -> dict:
-    """Update resolution parameters in workflow."""
-
-    # Node classes that accept resolution parameters
-    resolution_nodes = [
-        "ImageScale",
-        "WanImageToVideo",
-        "WanFirstLastFrameToVideo",
-    ]
-
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-
-        if class_type in resolution_nodes:
-            if width is not None and "width" in inputs:
-                workflow[node_id]["inputs"]["width"] = width
-            if height is not None and "height" in inputs:
-                workflow[node_id]["inputs"]["height"] = height
-            if length is not None and "length" in inputs:
-                workflow[node_id]["inputs"]["length"] = length
-
-    return workflow
-
-
-def update_workflow_sampler(
-    workflow: dict,
-    steps: int = None,
-    cfg: float = None,
-    seed: int = None,
-) -> dict:
-    """Update sampler parameters in workflow."""
-
-    sampler_classes = ["KSampler", "KSamplerAdvanced"]
-
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-
-        if class_type in sampler_classes:
-            if steps is not None and "steps" in inputs:
-                workflow[node_id]["inputs"]["steps"] = steps
-            if cfg is not None and "cfg" in inputs:
-                workflow[node_id]["inputs"]["cfg"] = cfg
-            if seed is not None and seed > 0 and "seed" in inputs:
-                workflow[node_id]["inputs"]["seed"] = seed
-
-    return workflow
-
-
-def update_workflow_lora(
-    workflow: dict,
-    lora_strength: float = None,
-) -> dict:
-    """Update LoRA strength in workflow."""
-
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-
-        if class_type == "LoraLoader":
-            if lora_strength is not None:
-                workflow[node_id]["inputs"]["strength_model"] = lora_strength
-                workflow[node_id]["inputs"]["strength_clip"] = lora_strength
-
-    return workflow
+    return pipe
 
 
 def generate_video(
     prompt: str,
     output_path: str,
-    start_frame: str | None = None,
-    end_frame: str | None = None,
-    style_ref: str | None = None,
+    start_frame: Optional[str] = None,
+    end_frame: Optional[str] = None,
+    style_ref: Optional[str] = None,
     length: int = 81,
     steps: int = 8,
     cfg: float = 1.0,
     seed: int = 0,
-    width: int = None,
-    height: int = None,
-    resolution_preset: str = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    resolution_preset: Optional[str] = None,
     lora_strength: float = 1.25,
     timeout: int = 600,
-    workflow_path: str = None,
 ) -> str:
     """
-    Generate a video using WAN 2.2 with LightX2V distillation via ComfyUI.
+    Generate a video using WAN 2.2 via diffusers.
 
     Args:
         prompt: Text prompt describing the video content/motion
         output_path: Path to save the generated video
-        start_frame: Optional path to starting frame image
-        end_frame: Optional path to ending frame image
+        start_frame: Path to starting frame image (required)
+        end_frame: Optional path to ending frame image (enables FLF2V mode)
         style_ref: Optional path to style configuration JSON
         length: Number of frames to generate (default 81 = ~5 seconds at 16fps)
         steps: Number of sampling steps (default 8 with LightX2V distillation)
@@ -217,19 +140,22 @@ def generate_video(
         height: Video height (overrides preset)
         resolution_preset: Resolution preset ("low", "medium", "high")
         lora_strength: LightX2V LoRA strength (default 1.25 for I2V)
-        timeout: Maximum time to wait for generation
-        workflow_path: Custom workflow file path
+        timeout: Maximum time (kept for CLI compatibility)
 
     Returns:
         Path to saved video
     """
-    # Initialize client
-    client = ComfyUIClient()
-
-    if not client.is_available():
-        print_status("ComfyUI server not available!", "error")
-        print_status("Please start ComfyUI: python main.py --listen 0.0.0.0 --port 8188", "error")
-        sys.exit(1)
+    # Validate inputs
+    if not start_frame:
+        if end_frame:
+            # If only end frame provided, treat as start frame
+            start_frame = end_frame
+            end_frame = None
+            print_status("Using end frame as start frame for I2V", "info")
+        else:
+            print_status("Error: At least one frame (start_frame) is required", "error")
+            print_status("Text-to-video without frames is not yet supported", "error")
+            sys.exit(1)
 
     # Apply resolution preset if specified
     if resolution_preset and resolution_preset in RESOLUTION_PRESETS:
@@ -238,42 +164,36 @@ def generate_video(
             width = preset["width"]
         if height is None:
             height = preset["height"]
-        if length == 81:  # Default value, override with preset
+        if length == 81:  # Default value
             length = preset["length"]
         print_status(f"Using '{resolution_preset}' preset: {width}x{height}, {length} frames")
 
-    # Determine mode based on inputs
-    if workflow_path:
-        mode = "custom"
-        workflow_file = Path(workflow_path)
-        print_status(f"Mode: Custom workflow")
-    elif start_frame and end_frame:
-        mode = "flf2v"
-        workflow_file = FLF2V_WORKFLOW
-        print_status("Mode: First-Last-Frame (FLF2V) - 8-step LightX2V")
-    elif start_frame:
-        mode = "i2v"
-        workflow_file = I2V_WORKFLOW
-        print_status("Mode: Image-to-Video (I2V) - 8-step LightX2V")
-    elif end_frame:
-        # If only end frame provided, treat as start frame for I2V
-        mode = "i2v"
-        start_frame = end_frame
-        end_frame = None
-        workflow_file = I2V_WORKFLOW
-        print_status("Mode: Image-to-Video (I2V) - using end frame as start")
-    else:
-        print_status("Error: At least one frame (start_frame) is required", "error")
-        print_status("Text-to-video without frames is not yet supported in this workflow", "error")
-        sys.exit(1)
+    # Set defaults
+    if width is None:
+        width = 832
+    if height is None:
+        height = 480
 
-    # Validate frame files exist
-    if start_frame and not Path(start_frame).exists():
+    # Determine mode
+    mode = "FLF2V" if end_frame else "I2V"
+    print_status(f"Mode: {mode} - {'First-Last-Frame' if mode == 'FLF2V' else 'Image-to-Video'}")
+
+    # Validate frame files
+    if not Path(start_frame).exists():
         print_status(f"Start frame not found: {start_frame}", "error")
         sys.exit(1)
     if end_frame and not Path(end_frame).exists():
         print_status(f"End frame not found: {end_frame}", "error")
         sys.exit(1)
+
+    # Load frames
+    start_image = Image.open(start_frame).convert("RGB")
+    print_status(f"Loaded start frame: {start_frame}")
+
+    end_image = None
+    if end_frame:
+        end_image = Image.open(end_frame).convert("RGB")
+        print_status(f"Loaded end frame: {end_frame}")
 
     # Load style configuration if provided
     style_config = None
@@ -288,117 +208,75 @@ def generate_video(
     enhanced_prompt = build_enhanced_prompt(prompt, style_config)
     print_status(f"Prompt: {enhanced_prompt[:100]}...")
 
-    # Load workflow
-    if not workflow_file.exists():
-        print_status(f"Workflow not found: {workflow_file}", "error")
-        print_status("Please ensure WAN workflows are set up correctly.", "error")
-        sys.exit(1)
+    # Load pipeline
+    pipe = load_wan_pipeline(use_lora=True)
 
+    # Set LoRA scale if using LoRA
     try:
-        workflow = load_workflow(str(workflow_file))
-    except json.JSONDecodeError as e:
-        print_status(f"Invalid workflow JSON: {e}", "error")
-        sys.exit(1)
+        pipe.set_adapters(["default"], adapter_weights=[lora_strength])
+        print_status(f"LoRA strength set to: {lora_strength}")
+    except Exception:
+        pass  # LoRA might not be loaded
 
-    # Upload images
-    print_status("Uploading frames to ComfyUI...", "progress")
+    # Set up generator for reproducibility
+    device = get_device()
+    generator = None
+    if seed > 0:
+        generator = torch.Generator(device=device).manual_seed(seed)
+        print_status(f"Using seed: {seed}")
+    else:
+        print_status("Using random seed")
 
-    start_frame_name = None
-    end_frame_name = None
-
-    if start_frame:
-        try:
-            result = client.upload_image(start_frame)
-            start_frame_name = result["name"]
-            print_status(f"Uploaded start frame: {start_frame_name}")
-        except Exception as e:
-            print_status(f"Failed to upload start frame: {e}", "error")
-            sys.exit(1)
-
-    if end_frame:
-        try:
-            result = client.upload_image(end_frame)
-            end_frame_name = result["name"]
-            print_status(f"Uploaded end frame: {end_frame_name}")
-        except Exception as e:
-            print_status(f"Failed to upload end frame: {e}", "error")
-            sys.exit(1)
-
-    # Update workflow
-    workflow = update_workflow_prompts(workflow, enhanced_prompt)
-    workflow = update_workflow_images(workflow, start_frame_name, end_frame_name)
-    workflow = update_workflow_resolution(workflow, width, height, length)
-    workflow = update_workflow_sampler(workflow, steps, cfg, seed)
-    workflow = update_workflow_lora(workflow, lora_strength)
-
-    # Execute workflow
-    print_status("Submitting video generation request...", "progress")
-    print_status(f"Settings: {length} frames, {steps} steps, CFG {cfg}, LoRA {lora_strength}")
-    if width and height:
-        print_status(f"Resolution: {width}x{height}")
+    # Generate
+    print_status(f"Generating video: {width}x{height}, {length} frames, {steps} steps")
+    print_status(f"CFG: {cfg}, LoRA strength: {lora_strength}")
 
     start_time = time.time()
-
-    def on_progress(msg):
-        elapsed = time.time() - start_time
-        print_status(f"{msg} ({format_duration(elapsed)})", "progress")
+    progress_callback = create_progress_callback(steps)
 
     try:
-        result = client.execute_workflow(
-            workflow,
-            timeout=timeout,
-            on_progress=on_progress,
-            validate=True,
+        from diffusers.utils import export_to_video
+
+        output = pipe(
+            prompt=enhanced_prompt,
+            image=start_image,
+            last_image=end_image,  # None for I2V, Image for FLF2V
+            height=height,
+            width=width,
+            num_frames=length,
+            num_inference_steps=steps,
+            guidance_scale=cfg,
+            generator=generator,
+            callback_on_step_end=progress_callback,
+            callback_on_step_end_tensor_inputs=["latents"],
+        ).frames[0]
+
+        # Save video
+        out_path = ensure_output_dir(output_path)
+
+        # Ensure output path has .mp4 extension
+        if not str(out_path).lower().endswith('.mp4'):
+            out_path = Path(str(out_path) + '.mp4') if not str(out_path).endswith('.') else Path(str(out_path) + 'mp4')
+
+        export_to_video(output, str(out_path), fps=16)
+
+        total_time = time.time() - start_time
+        duration_sec = length / 16
+        print_status(
+            f"Video saved to: {out_path} (~{duration_sec:.1f}s at 16fps, generated in {format_duration(total_time)})",
+            "success"
         )
 
-        # Get output videos
-        videos = client.get_output_videos(result)
+        return str(out_path)
 
-        if not videos:
-            # Try getting as images (some workflows output as image sequence)
-            images = client.get_output_images(result)
-            if images:
-                print_status("Output is image sequence, video file may be in ComfyUI output folder", "warning")
-            else:
-                print_status("No video generated!", "error")
-                sys.exit(1)
-
-        if videos:
-            # Download and save the video
-            output = ensure_output_dir(output_path)
-
-            video_info = videos[0]
-            client.download_output(video_info, str(output))
-
-            total_time = time.time() - start_time
-            print_status(f"Video saved to: {output_path} ({format_duration(total_time)})", "success")
-            return str(output)
-        else:
-            # Check if video was saved directly by ComfyUI
-            print_status("Video may have been saved directly to ComfyUI output folder", "warning")
-            print_status(f"Check: ComfyUI/output/", "warning")
-            return output_path
-
-    except WorkflowValidationError as e:
-        print_status(f"Workflow validation failed:", "error")
-        print(str(e))
-        sys.exit(1)
-    except ComfyUIError as e:
-        print_status(f"ComfyUI error:", "error")
-        print(str(e))
-        sys.exit(1)
-    except TimeoutError:
-        print_status(f"Generation timed out after {timeout}s", "error")
-        print_status("Try reducing resolution or number of frames", "error")
-        sys.exit(1)
     except Exception as e:
         print_status(f"Generation failed: {e}", "error")
-        sys.exit(1)
+        raise
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate videos using WAN 2.2 with LightX2V distillation via ComfyUI"
+        description="Generate videos using WAN 2.2 via diffusers"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -449,12 +327,12 @@ def main():
     parser.add_argument(
         "--width",
         type=int,
-        help="Video width (default: from preset or workflow)"
+        help="Video width (default: from preset or 832)"
     )
     parser.add_argument(
         "--height",
         type=int,
-        help="Video height (default: from preset or workflow)"
+        help="Video height (default: from preset or 480)"
     )
     parser.add_argument(
         "--preset",
@@ -466,17 +344,13 @@ def main():
         "--lora-strength",
         type=float,
         default=1.25,
-        help="LightX2V LoRA strength (default: 1.25 for I2V)"
-    )
-    parser.add_argument(
-        "--workflow",
-        help="Custom workflow JSON file path"
+        help="LightX2V LoRA strength (default: 1.25)"
     )
     parser.add_argument(
         "--timeout",
         type=int,
         default=600,
-        help="Maximum time to wait in seconds (default: 600 = 10 min)"
+        help="Timeout in seconds (kept for CLI compatibility)"
     )
 
     args = parser.parse_args()
@@ -496,7 +370,6 @@ def main():
         resolution_preset=args.preset,
         lora_strength=args.lora_strength,
         timeout=args.timeout,
-        workflow_path=args.workflow,
     )
 
 

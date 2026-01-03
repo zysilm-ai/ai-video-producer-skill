@@ -4,6 +4,9 @@
 # Output files
 outputs/
 
+# HuggingFace models (downloaded locally)
+models/
+
 # Python
 __pycache__/
 *.py[cod]

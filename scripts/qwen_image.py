@@ -1,22 +1,30 @@
 #!/usr/bin/env python3
 """
-Generate keyframe images using Qwen Image Edit 2511 via ComfyUI.
+Generate keyframe images using Qwen Image Edit 2511 via HuggingFace diffusers.
 Used for creating keyframes in the AI video production workflow.
-Qwen Image Edit 2511 provides the best open-source image editing with
-enhanced character/scene consistency across frames.
+Supports T2I, Edit (with reference), and Pose (with ControlNet) modes.
+Supports GGUF quantization for low VRAM (10GB) systems.
 """
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
-from comfyui_client import (
-    ComfyUIClient,
-    ComfyUIError,
-    WorkflowValidationError,
-    load_workflow,
+import torch
+from PIL import Image
+
+from diffusers_utils import (
+    get_device,
+    get_torch_dtype,
+    enable_memory_optimization,
+    create_progress_callback,
+    get_pipeline_from_cache,
+    set_pipeline_cache,
+    clear_vram,
+    get_resolution_preset,
+    print_memory_stats,
 )
 from utils import (
     load_style_config,
@@ -27,209 +35,221 @@ from utils import (
 )
 
 
-# Default workflow paths
-WORKFLOW_DIR = Path(__file__).parent / "workflows"
-T2I_WORKFLOW = WORKFLOW_DIR / "qwen_t2i.json"
-EDIT_WORKFLOW = WORKFLOW_DIR / "qwen_edit.json"
-POSE_WORKFLOW = WORKFLOW_DIR / "qwen_pose.json"
+# Model IDs
+QWEN_EDIT_MODEL = "Qwen/Qwen-Image-Edit-2511"
+QWEN_CONTROLNET_MODEL = "InstantX/Qwen-Image-ControlNet-Union"
+QWEN_LIGHTNING_LORA = "lightx2v/Qwen-Image-Edit-2511-Lightning"
+QWEN_LIGHTNING_LORA_FILENAME = "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors"
+
+# GGUF quantized models (for low VRAM)
+QWEN_GGUF_REPO = "unsloth/Qwen-Image-Edit-2511-GGUF"
+QWEN_GGUF_VARIANTS = {
+    "q2_k": "qwen-image-edit-2511-Q2_K.gguf",      # 7.2GB, ~4-5GB VRAM
+    "q3_k_m": "qwen-image-edit-2511-Q3_K_M.gguf",  # 9.7GB, ~5-6GB VRAM
+    "q4_k_m": "qwen-image-edit-2511-Q4_K_M.gguf",  # 13.1GB, ~7-8GB VRAM
+    "q8_0": "qwen-image-edit-2511-Q8_0.gguf",      # 21.8GB, ~12GB VRAM
+}
 
 # Resolution presets for different VRAM levels
 RESOLUTION_PRESETS = {
-    "low": {"width": 640, "height": 384},      # ~8GB VRAM
-    "medium": {"width": 832, "height": 480},   # ~10GB VRAM
-    "high": {"width": 1280, "height": 720},    # ~16GB+ VRAM
+    "low": {"width": 640, "height": 384},
+    "medium": {"width": 832, "height": 480},
+    "high": {"width": 1280, "height": 720},
 }
 
 
-def update_workflow_prompts(workflow: dict, prompt: str, negative_prompt: str = None) -> dict:
-    """Update text prompts in workflow."""
-    default_negative = "blurry, low quality, distorted, deformed, poorly drawn, disfigured, ugly, worst quality"
-
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-        
-        # Check for Qwen Generator inputs directly
-        if "prompt" in inputs and "{{PROMPT}}" in str(inputs["prompt"]):
-            workflow[node_id]["inputs"]["prompt"] = prompt
-            
-        if "negative_prompt" in inputs:
-            workflow[node_id]["inputs"]["negative_prompt"] = negative_prompt or default_negative
-
-        # Also support standard CLIPTextEncode if used in custom workflows
-        if class_type == "CLIPTextEncode":
-            current_text = inputs.get("text", "")
-            if "{{PROMPT}}" in current_text:
-                workflow[node_id]["inputs"]["text"] = prompt
-
-    return workflow
-
-
-def update_workflow_images(workflow: dict, reference_image: str = None, pose_image: str = None) -> dict:
-    """Update image inputs in workflow for Editing/Pose mode.
-
-    Handles LoadImage nodes for both reference and pose images.
+def load_qwen_pipeline(
+    use_controlnet: bool = False,
+    use_lightning: bool = False,
+    gguf_variant: str = "q4_k_m",
+):
     """
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
+    Load Qwen Image Edit pipeline with caching.
 
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
-        title = node.get("_meta", {}).get("title", "").lower()
+    Args:
+        use_controlnet: Whether to load ControlNet for pose-guided generation
+        use_lightning: Whether to load Lightning LoRA for fast 4-step generation
+        gguf_variant: GGUF quantization variant ("q2_k", "q3_k_m", "q4_k_m", "q8_0", or None for BF16)
 
-        # Update LoadImage nodes
-        if class_type == "LoadImage":
-            current_image = str(inputs.get("image", ""))
-            # Update reference/input image
-            if reference_image and ("{{REFERENCE}}" in current_image or "reference" in title):
-                workflow[node_id]["inputs"]["image"] = reference_image
-            # Update pose image
-            if pose_image and ("{{POSE}}" in current_image or "pose" in title):
-                workflow[node_id]["inputs"]["image"] = pose_image
+    Returns:
+        Loaded pipeline (cached for reuse)
+    """
+    import math
+    from huggingface_hub import hf_hub_download
 
-    return workflow
+    # Determine cache key based on configuration
+    if use_controlnet:
+        cache_key = "qwen_controlnet"
+    elif gguf_variant:
+        cache_key = f"qwen_gguf_{gguf_variant}"
+    elif use_lightning:
+        cache_key = "qwen_lightning"
+    else:
+        cache_key = "qwen_edit"
 
+    # Check cache first
+    cached_pipe = get_pipeline_from_cache(cache_key)
+    if cached_pipe is not None:
+        return cached_pipe
 
-def update_workflow_controlnet(workflow: dict, control_strength: float = 0.9, width: int = 832, height: int = 480) -> dict:
-    """Update ControlNet parameters in workflow."""
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
+    device = get_device()
+    dtype = get_torch_dtype(device)
 
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
+    if use_controlnet:
+        from diffusers import FluxControlNetPipeline, FluxControlNetModel
 
-        # Update ControlNet strength
-        if class_type in ["ControlNetApplyAdvanced", "ControlNetApplySD3"]:
-            workflow[node_id]["inputs"]["strength"] = control_strength
+        print_status("Loading Qwen ControlNet pipeline...", "progress")
 
-        # Update OpenPose preprocessor resolution (use max dimension)
-        if class_type == "OpenposePreprocessor":
-            workflow[node_id]["inputs"]["resolution"] = max(width, height)
+        # Load ControlNet model
+        controlnet = FluxControlNetModel.from_pretrained(
+            QWEN_CONTROLNET_MODEL,
+            torch_dtype=dtype,
+        )
 
-        # Update ImageScale dimensions for pose image
-        if class_type == "ImageScale":
-            title = node.get("_meta", {}).get("title", "").lower()
-            if "pose" in title or "scale" in title:
-                workflow[node_id]["inputs"]["width"] = width
-                workflow[node_id]["inputs"]["height"] = height
+        # Load pipeline with ControlNet
+        pipe = FluxControlNetPipeline.from_pretrained(
+            QWEN_EDIT_MODEL,
+            controlnet=controlnet,
+            torch_dtype=dtype,
+        )
 
-    return workflow
+        pipe = enable_memory_optimization(pipe)
+        print_status("Qwen ControlNet pipeline loaded", "success")
 
+    elif gguf_variant and gguf_variant in QWEN_GGUF_VARIANTS:
+        # Load GGUF quantized model for low VRAM
+        from diffusers import QwenImageEditPlusPipeline, QwenImageTransformer2DModel, GGUFQuantizationConfig
 
-def update_workflow_params(
-    workflow: dict,
-    width: int = None,
-    height: int = None,
-    steps: int = None,
-    cfg: float = None,
-    seed: int = None,
-    shift: float = None,
-) -> dict:
-    """Update generation parameters in workflow."""
+        gguf_filename = QWEN_GGUF_VARIANTS[gguf_variant]
+        print_status(f"Loading Qwen GGUF ({gguf_variant.upper()})...", "progress")
 
-    # Qwen Generator and other sampling nodes
-    generation_classes = [
-        "RH_Qwen_Generator",
-        "KSampler",
-        "KSamplerAdvanced",
-        "WanVideoSampler"
-    ]
+        # Download GGUF file from unsloth
+        gguf_path = hf_hub_download(
+            repo_id=QWEN_GGUF_REPO,
+            filename=gguf_filename,
+        )
+        print_status(f"GGUF model: {gguf_filename}", "info")
 
-    # Empty latent classes
-    latent_classes = [
-        "EmptyQwenImageLayeredLatentImage",
-        "EmptySD3LatentImage",
-        "EmptyLatentImage",
-    ]
+        # Load transformer from GGUF using original Qwen config
+        # See: https://github.com/huggingface/diffusers/issues/12891
+        transformer = QwenImageTransformer2DModel.from_single_file(
+            gguf_path,
+            quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
+            torch_dtype=torch.bfloat16,
+            config=QWEN_EDIT_MODEL,
+            subfolder="transformer",
+        )
 
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
+        # Load pipeline with quantized transformer
+        pipe = QwenImageEditPlusPipeline.from_pretrained(
+            QWEN_EDIT_MODEL,
+            transformer=transformer,
+            torch_dtype=torch.bfloat16,
+        )
 
-        class_type = node.get("class_type", "")
-        inputs = node.get("inputs", {})
+        # Keep model fully on GPU for speed (Q2_K ~7GB fits in 10GB VRAM)
+        pipe.to("cuda")
+        print_status(f"Qwen GGUF pipeline loaded on GPU ({gguf_variant.upper()})", "success")
 
-        # Update sampler/generator nodes
-        if class_type in generation_classes:
-            if width is not None and "width" in inputs:
-                workflow[node_id]["inputs"]["width"] = width
-            if height is not None and "height" in inputs:
-                workflow[node_id]["inputs"]["height"] = height
-            if steps is not None and "steps" in inputs:
-                workflow[node_id]["inputs"]["steps"] = steps
-            if cfg is not None and "cfg" in inputs:
-                workflow[node_id]["inputs"]["cfg"] = cfg
-            if seed is not None and seed > 0 and "seed" in inputs:
-                workflow[node_id]["inputs"]["seed"] = seed
+    else:
+        from diffusers import QwenImageEditPlusPipeline, FlowMatchEulerDiscreteScheduler
 
-        # Update empty latent nodes
-        if class_type in latent_classes:
-            if width is not None and "width" in inputs:
-                workflow[node_id]["inputs"]["width"] = width
-            if height is not None and "height" in inputs:
-                workflow[node_id]["inputs"]["height"] = height
+        print_status("Loading Qwen Image Edit pipeline (BF16)...", "progress")
 
-        # Update ModelSamplingAuraFlow shift parameter (for flow matching models)
-        if class_type == "ModelSamplingAuraFlow":
-            if shift is not None and "shift" in inputs:
-                workflow[node_id]["inputs"]["shift"] = shift
+        # Custom scheduler config for Lightning LoRA
+        if use_lightning:
+            scheduler_config = {
+                "base_image_seq_len": 256,
+                "base_shift": math.log(3),
+                "invert_sigmas": False,
+                "max_image_seq_len": 8192,
+                "max_shift": math.log(3),
+                "num_train_timesteps": 1000,
+                "shift": 1.0,
+                "shift_terminal": None,
+                "stochastic_sampling": False,
+                "time_shift_type": "exponential",
+                "use_beta_sigmas": False,
+                "use_dynamic_shifting": True,
+                "use_exponential_sigmas": False,
+                "use_karras_sigmas": False,
+            }
+            scheduler = FlowMatchEulerDiscreteScheduler.from_config(scheduler_config)
 
-    return workflow
+            pipe = QwenImageEditPlusPipeline.from_pretrained(
+                QWEN_EDIT_MODEL,
+                scheduler=scheduler,
+                torch_dtype=dtype,
+            )
+        else:
+            pipe = QwenImageEditPlusPipeline.from_pretrained(
+                QWEN_EDIT_MODEL,
+                torch_dtype=dtype,
+            )
+
+        # Load Lightning LoRA for fast 4-step generation
+        if use_lightning:
+            print_status("Loading Lightning distillation LoRA...", "progress")
+            try:
+                pipe.load_lora_weights(
+                    QWEN_LIGHTNING_LORA,
+                    weight_name=QWEN_LIGHTNING_LORA_FILENAME,
+                )
+                print_status("Lightning LoRA loaded (4-step mode)", "success")
+            except Exception as e:
+                print_status(f"Warning: Could not load Lightning LoRA: {e}", "warning")
+                print_status("Using base model (slower, more steps needed)", "warning")
+
+        pipe = enable_memory_optimization(pipe)
+        print_status("Qwen Image Edit pipeline loaded", "success")
+
+    # Cache for reuse
+    set_pipeline_cache(cache_key, pipe)
+    print_memory_stats()
+
+    return pipe
 
 
 def generate_image(
     prompt: str,
     output_path: str,
-    style_ref: str | None = None,
-    reference_image: str | None = None,
-    pose_image: str | None = None,
+    style_ref: Optional[str] = None,
+    reference_image: Optional[str] = None,
+    pose_image: Optional[str] = None,
     control_strength: float = 0.9,
     width: int = 832,
     height: int = 480,
     seed: int = 0,
     steps: int = 20,
-    cfg: float = 1.0,
+    cfg: float = 4.0,
     shift: float = 5.0,
-    resolution_preset: str = None,
-    workflow_path: str | None = None,
+    resolution_preset: Optional[str] = None,
+    gguf_variant: Optional[str] = "q2_k",
     timeout: int = 300,
 ) -> str:
     """
-    Generate a keyframe image using Qwen Image Edit 2511 via ComfyUI.
+    Generate a keyframe image using Qwen Image Edit 2511 via diffusers.
 
     Args:
         prompt: Text prompt describing the image
         output_path: Path to save the generated image
         style_ref: Optional path to style configuration JSON
-        reference_image: Optional reference image for editing/consistency
+        reference_image: Optional reference image for editing/consistency (up to 3 images)
         pose_image: Optional pose reference image (uses ControlNet for pose guidance)
         control_strength: ControlNet strength for pose guidance (default: 0.9)
         width: Image width
         height: Image height
         seed: Random seed (0 for random)
-        steps: Number of sampling steps
-        cfg: Classifier-free guidance scale (default 1.0 for flow matching)
-        shift: ModelSamplingAuraFlow shift parameter (default 5.0, range 3.0-8.0)
+        steps: Number of sampling steps (default 20)
+        cfg: Guidance scale (default 4.0)
+        shift: Flow matching shift parameter (default 5.0, range 3.0-8.0)
         resolution_preset: Resolution preset ("low", "medium", "high")
-        workflow_path: Optional custom workflow path
-        timeout: Maximum time to wait for generation
+        gguf_variant: GGUF quantization variant ("q2_k", "q3_k_m", "q4_k_m", "q8_0", or None for BF16)
+        timeout: Maximum time to wait for generation (unused in diffusers, kept for compatibility)
 
     Returns:
         Path to saved image
     """
-    # Initialize client
-    client = ComfyUIClient()
-
-    if not client.is_available():
-        print_status("ComfyUI server not available!", "error")
-        print_status("Please start ComfyUI: python main.py --listen 0.0.0.0 --port 8188", "error")
-        sys.exit(1)
-
     # Apply resolution preset if specified
     if resolution_preset and resolution_preset in RESOLUTION_PRESETS:
         preset = RESOLUTION_PRESETS[resolution_preset]
@@ -249,148 +269,126 @@ def generate_image(
     # Build enhanced prompt
     enhanced_prompt = build_enhanced_prompt(prompt, style_config)
 
-    # Determine workflow based on inputs
-    if workflow_path:
-        wf_path = Path(workflow_path)
-        print_status("Using custom workflow")
-    elif pose_image and reference_image:
-        # Pose-guided generation with character reference
-        if POSE_WORKFLOW.exists():
-            wf_path = POSE_WORKFLOW
-            print_status("Using Qwen + ControlNet pose workflow (pose-guided with reference)")
-        else:
-            print_status("Pose workflow not found!", "error")
-            print_status("Run setup_comfyui.py to install ControlNet support", "error")
-            sys.exit(1)
+    # Determine mode based on inputs
+    use_controlnet = pose_image is not None
+    if use_controlnet:
+        print_status("Mode: Pose-guided generation with ControlNet")
     elif reference_image:
-        if EDIT_WORKFLOW.exists():
-            wf_path = EDIT_WORKFLOW
-            print_status("Using Qwen Image Edit 2511 workflow (consistency/editing)")
-        else:
-            print_status("Edit workflow not found!", "error")
-            sys.exit(1)
-    elif T2I_WORKFLOW.exists():
-        wf_path = T2I_WORKFLOW
-        print_status("Using Qwen Image Edit 2511 T2I workflow")
+        print_status("Mode: Edit/Consistency with reference image")
     else:
-        print_status("Qwen workflows not found!", "error")
-        print_status("Please ensure Qwen workflows are set up correctly.", "error")
-        sys.exit(1)
+        print_status("Mode: Text-to-Image generation")
 
-    print_status(f"Generating image with prompt: {enhanced_prompt[:100]}...")
-    print_status(f"Resolution: {width}x{height}, Steps: {steps}, CFG: {cfg}, Shift: {shift}")
+    # Load pipeline
+    pipe = load_qwen_pipeline(
+        use_controlnet=use_controlnet,
+        gguf_variant=gguf_variant if not use_controlnet else None,
+    )
 
-    # Load workflow
-    if not wf_path.exists():
-        print_status(f"Workflow not found: {wf_path}", "error")
-        sys.exit(1)
+    # Set up generator for reproducibility
+    device = get_device()
+    generator = None
+    if seed > 0:
+        generator = torch.Generator(device=device).manual_seed(seed)
+        print_status(f"Using seed: {seed}")
+    else:
+        print_status("Using random seed")
 
-    try:
-        workflow = load_workflow(str(wf_path))
-    except json.JSONDecodeError as e:
-        print_status(f"Invalid workflow JSON: {e}", "error")
-        sys.exit(1)
-
-    # Upload reference image if provided
-    uploaded_ref_name = None
+    # Load reference image(s) if provided
+    ref_images = None
     if reference_image:
-        if not Path(reference_image).exists():
+        ref_path = Path(reference_image)
+        if ref_path.exists():
+            ref_img = Image.open(ref_path).convert("RGB")
+            ref_images = [ref_img]
+            print_status(f"Loaded reference image: {reference_image}")
+        else:
             print_status(f"Reference image not found: {reference_image}", "error")
             sys.exit(1)
 
-        print_status(f"Uploading reference image: {reference_image}", "progress")
-        try:
-            upload_result = client.upload_image(reference_image)
-            uploaded_ref_name = upload_result.get('name', str(upload_result))
-            print_status(f"Reference uploaded as: {uploaded_ref_name}")
-        except Exception as e:
-            print_status(f"Failed to upload reference image: {e}", "error")
-            sys.exit(1)
-
-    # Upload pose image if provided
-    uploaded_pose_name = None
+    # Load pose image for ControlNet
+    control_image = None
     if pose_image:
-        if not Path(pose_image).exists():
+        pose_path = Path(pose_image)
+        if pose_path.exists():
+            control_image = Image.open(pose_path).convert("RGB")
+            print_status(f"Loaded pose image: {pose_image}")
+            print_status(f"ControlNet strength: {control_strength}")
+        else:
             print_status(f"Pose image not found: {pose_image}", "error")
             sys.exit(1)
 
-        print_status(f"Uploading pose image: {pose_image}", "progress")
-        try:
-            upload_result = client.upload_image(pose_image)
-            uploaded_pose_name = upload_result.get('name', str(upload_result))
-            print_status(f"Pose uploaded as: {uploaded_pose_name}")
-            print_status(f"ControlNet strength: {control_strength}")
-        except Exception as e:
-            print_status(f"Failed to upload pose image: {e}", "error")
-            sys.exit(1)
+    # Generate
+    print_status(f"Generating: {enhanced_prompt[:100]}...")
+    print_status(f"Resolution: {width}x{height}, Steps: {steps}, CFG: {cfg}")
 
-    # Update workflow
-    workflow = update_workflow_prompts(workflow, enhanced_prompt)
-    workflow = update_workflow_images(workflow, uploaded_ref_name, uploaded_pose_name)
-    if uploaded_pose_name:
-        workflow = update_workflow_controlnet(workflow, control_strength, width, height)
-    workflow = update_workflow_params(
-        workflow,
-        width=width,
-        height=height,
-        steps=steps,
-        cfg=cfg,
-        seed=seed,
-        shift=shift,
-    )
-
-    # Execute workflow
-    print_status("Submitting to ComfyUI...", "progress")
     start_time = time.time()
-
-    def on_progress(msg):
-        elapsed = time.time() - start_time
-        print_status(f"{msg} ({format_duration(elapsed)})", "progress")
+    progress_callback = create_progress_callback(steps)
 
     try:
-        result = client.execute_workflow(
-            workflow,
-            timeout=timeout,
-            on_progress=on_progress,
-            validate=True,
-        )
+        if use_controlnet and control_image:
+            # Pose-guided generation with ControlNet
+            output = pipe(
+                prompt=enhanced_prompt,
+                image=ref_images,
+                control_image=control_image,
+                controlnet_conditioning_scale=control_strength,
+                height=height,
+                width=width,
+                num_inference_steps=steps,
+                true_cfg_scale=cfg,
+                generator=generator,
+                callback_on_step_end=progress_callback,
+                callback_on_step_end_tensor_inputs=["latents"],
+            ).images[0]
+        elif ref_images:
+            # Edit mode with reference image
+            output = pipe(
+                prompt=enhanced_prompt,
+                image=ref_images,
+                height=height,
+                width=width,
+                num_inference_steps=steps,
+                true_cfg_scale=cfg,
+                generator=generator,
+                callback_on_step_end=progress_callback,
+                callback_on_step_end_tensor_inputs=["latents"],
+            ).images[0]
+        else:
+            # T2I mode - create a blank/noise image as reference
+            # QwenImageEditPlusPipeline requires an image input
+            import numpy as np
+            blank_image = Image.fromarray(
+                np.random.randint(128, 130, (height, width, 3), dtype=np.uint8)
+            )
+            output = pipe(
+                prompt=enhanced_prompt,
+                image=[blank_image],
+                height=height,
+                width=width,
+                num_inference_steps=steps,
+                true_cfg_scale=cfg,
+                generator=generator,
+                callback_on_step_end=progress_callback,
+                callback_on_step_end_tensor_inputs=["latents"],
+            ).images[0]
 
-        # Get output images
-        images = client.get_output_images(result)
-
-        if not images:
-            print_status("No images generated!", "error")
-            sys.exit(1)
-
-        # Download and save the first image
-        output = ensure_output_dir(output_path)
-
-        image_info = images[0]
-        client.download_output(image_info, str(output))
+        # Save output
+        out_path = ensure_output_dir(output_path)
+        output.save(out_path)
 
         total_time = time.time() - start_time
         print_status(f"Image saved to: {output_path} ({format_duration(total_time)})", "success")
-        return str(output)
 
-    except WorkflowValidationError as e:
-        print_status("Workflow validation failed:", "error")
-        print(str(e))
-        sys.exit(1)
-    except ComfyUIError as e:
-        print_status("ComfyUI error:", "error")
-        print(str(e))
-        sys.exit(1)
-    except TimeoutError:
-        print_status(f"Generation timed out after {timeout}s", "error")
-        sys.exit(1)
+        return str(out_path)
+
     except Exception as e:
         print_status(f"Generation failed: {e}", "error")
-        sys.exit(1)
+        raise
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate keyframe images using Qwen Image Edit 2511 via ComfyUI"
+        description="Generate keyframe images using Qwen Image Edit 2511 via diffusers"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -455,27 +453,33 @@ def main():
     parser.add_argument(
         "--cfg",
         type=float,
-        default=1.0,
-        help="CFG scale (default: 1.0 for flow matching models)"
+        default=4.0,
+        help="Guidance scale (default: 4.0)"
+    )
+    parser.add_argument(
+        "--gguf",
+        dest="gguf_variant",
+        choices=["q2_k", "q3_k_m", "q4_k_m", "q8_0", "none"],
+        default="q2_k",
+        help="GGUF quantization variant (default: q2_k ~7GB, fits 10GB VRAM; use 'none' for BF16)"
     )
     parser.add_argument(
         "--shift",
         type=float,
         default=5.0,
-        help="ModelSamplingAuraFlow shift (default: 5.0, range 3.0-8.0)"
-    )
-    parser.add_argument(
-        "--workflow",
-        help="Custom workflow JSON path"
+        help="Flow matching shift parameter (default: 5.0, kept for compatibility)"
     )
     parser.add_argument(
         "--timeout",
         type=int,
         default=600,
-        help="Maximum time to wait in seconds (default: 600)"
+        help="Timeout in seconds (kept for CLI compatibility)"
     )
 
     args = parser.parse_args()
+
+    # Handle gguf_variant - convert "none" to None
+    gguf_variant = args.gguf_variant if args.gguf_variant != "none" else None
 
     generate_image(
         prompt=args.prompt,
@@ -491,7 +495,7 @@ def main():
         cfg=args.cfg,
         shift=args.shift,
         resolution_preset=args.preset,
-        workflow_path=args.workflow,
+        gguf_variant=gguf_variant,
         timeout=args.timeout,
     )
 

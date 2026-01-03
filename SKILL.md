@@ -1,15 +1,15 @@
 ---
 name: ai-video-producer
 description: >
-  Complete AI video production workflow using WAN 2.2 and Qwen Image Edit 2511 models via ComfyUI.
+  Complete AI video production workflow using WAN 2.2 and Qwen Image Edit 2511 models via HuggingFace diffusers.
   Creates any video type: promotional, educational, narrative, social media,
   animations, game trailers, music videos, product demos, and more. Use when
   users want to create videos with AI, need help with video storyboarding,
   keyframe generation, or video prompt writing. Follows a philosophy-first
   approach: establish visual style and production philosophy, then execute
   scene by scene with user feedback at each stage. Supports advanced features
-  like layer-based compositing, pose transfer (AnyPose LoRA), and style
-  consistency (InStyle LoRA). Runs locally on RTX 3080+.
+  like layer-based compositing, pose transfer (ControlNet), and style
+  consistency. Runs locally on RTX 3080+ (10GB+ VRAM).
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, TodoWrite
 ---
 
@@ -19,39 +19,39 @@ Create professional AI-generated videos through a structured, iterative workflow
 
 ## Prerequisites & Auto-Setup
 
-**This skill requires ComfyUI with WAN 2.2 and Qwen Image Edit 2511 models. The setup script handles everything automatically.**
+**This skill requires WAN 2.2 and Qwen Image Edit 2511 models via HuggingFace diffusers. The setup script handles everything automatically.**
 
 ### First-Time Setup (Automatic)
 
-If ComfyUI is not detected, run the auto-setup script:
+Run the setup script to download required models:
 
 ```bash
-# Full automatic setup (~40GB download)
-python {baseDir}/scripts/setup_comfyui.py
+# Check current setup status
+python {baseDir}/scripts/setup_diffusers.py --check
 
-# Check setup status
-python {baseDir}/scripts/setup_comfyui.py --check
+# Download required models (~50GB)
+python {baseDir}/scripts/setup_diffusers.py --download
 
-# Start ComfyUI server
-python {baseDir}/scripts/setup_comfyui.py --start
+# Download all models including optional ControlNet (~55GB)
+python {baseDir}/scripts/setup_diffusers.py --download-all
 ```
 
 The setup script will:
-1. Clone and configure ComfyUI
-2. Install required custom nodes (ComfyUI-GGUF, ComfyUI_RH_Qwen-Image, comfyui_controlnet_aux, etc.)
-3. Download WAN 2.2 GGUF model (Q4_K_M for 10GB VRAM)
-4. Download Qwen Image Edit 2511 models (FP8)
-5. Download ControlNet Union model for pose-guided generation
-6. Install all Python dependencies
+1. Verify PyTorch with CUDA support is installed
+2. Verify diffusers, transformers, and accelerate are installed
+3. Download WAN 2.2 I2V model from HuggingFace
+4. Download Qwen Image Edit 2511 model
+5. Download LightX2V distillation LoRA for fast generation
+6. Optionally download ControlNet Union for pose-guided generation
 
 ### Before Each Session
 
-**Claude Code automatically handles ComfyUI:**
-- Checks if ComfyUI is running
-- Starts it if needed
-- Verifies the connection before generating
+**No server required!** Unlike ComfyUI-based workflows, diffusers runs directly in Python:
+- Models are loaded on first use and cached
+- Memory optimization is automatic based on VRAM
+- No background processes to manage
 
-No manual intervention required - just start your video project conversation.
+Just start your video project conversation.
 
 ### System Requirements
 
@@ -718,20 +718,20 @@ Shared keyframes are generated once and reused across scene boundaries.
 
 ### Auto-Setup Check (Step 1)
 
-Before starting video generation, automatically check and start ComfyUI:
+Before starting video generation, verify the diffusers setup:
 
 ```bash
 # Check setup status
-python {baseDir}/scripts/setup_comfyui.py --check
+python {baseDir}/scripts/setup_diffusers.py --check
 
-# If setup incomplete, run full setup
-python {baseDir}/scripts/setup_comfyui.py
+# If models missing, download them
+python {baseDir}/scripts/setup_diffusers.py --download
 
-# Verify ComfyUI is accessible, start if needed
-python {baseDir}/scripts/comfyui_client.py
+# Validate the complete setup
+python {baseDir}/scripts/validate_diffusers.py
 ```
 
-If ComfyUI is not running, start it in the background before proceeding.
+If models are missing, the setup script will download them automatically.
 
 ---
 
@@ -741,7 +741,8 @@ If ComfyUI is not running, start it in the background before proceeding.
 |--------|---------|---------------|
 | `qwen_image.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--style-ref`, `--reference`, `--pose`, `--control-strength` |
 | `wan_video.py` | Generate videos (WAN 2.2) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
-| `comfyui_client.py` | Test ComfyUI connection | (run directly to test) |
+| `setup_diffusers.py` | Setup and download models | `--check`, `--download`, `--download-all` |
+| `validate_diffusers.py` | Validate installation | `--detailed`, `--json` |
 
 ### Keyframe Generation Modes
 
@@ -769,27 +770,25 @@ If ComfyUI is not running, start it in the background before proceeding.
 | VRAM Required | 10GB (WAN Q4_K_M + Qwen FP8) |
 | Steps | 20 (Qwen), 8 (WAN) |
 
-### Models Required
+### Models Required (HuggingFace)
 
 **Video Generation (WAN 2.2):**
-| Model | Size | Purpose |
-|-------|------|---------|
-| wan2.2_i2v_low_noise_14B_Q4_K_M.gguf | 8.5GB | Video generation |
-| umt5_xxl_fp8_e4m3fn_scaled.safetensors | 4.9GB | WAN text encoder |
-| wan_2.1_vae.safetensors | 0.2GB | WAN VAE |
-| Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors | 0.7GB | Fast generation LoRA |
+| Model ID | Size | Purpose |
+|----------|------|---------|
+| `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | ~28GB | Video generation pipeline |
+| `lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v` | ~0.7GB | Fast 8-step generation LoRA |
 
 **Keyframe Generation (Qwen Image Edit 2511):**
-| Model | Size | Purpose |
-|-------|------|---------|
-| qwen_image_edit_2511_fp8mixed.safetensors | 12.0GB | Main Image Model (FP8) |
-| qwen_2.5_vl_7b_fp8_scaled.safetensors | 7.5GB | Vision-Language Text Encoder |
-| qwen_image_vae.safetensors | 0.2GB | Qwen VAE |
+| Model ID | Size | Purpose |
+|----------|------|---------|
+| `Qwen/Qwen-Image-Edit-2511` | ~20GB | Image generation pipeline |
 
-**ControlNet (for pose-guided generation):**
-| Model | Size | Purpose |
-|-------|------|---------|
-| Qwen-Image-InstantX-ControlNet-Union.safetensors | 3.54GB | Pose/depth/canny control |
+**ControlNet (optional, for pose-guided generation):**
+| Model ID | Size | Purpose |
+|----------|------|---------|
+| `InstantX/Qwen-Image-ControlNet-Union` | ~3.5GB | Pose/depth/canny control |
+
+Models are automatically cached in `~/.cache/huggingface/` on first download.
 
 See `SETUP.md` for installation instructions.
 See `references/prompt-engineering.md` for detailed prompt writing guidance.
