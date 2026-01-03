@@ -3,11 +3,22 @@
 Generate videos using WAN 2.2 via HuggingFace diffusers.
 Supports single-frame (I2V) and dual-frame (FLF2V) generation modes.
 Uses LightX2V distillation LoRA for fast 8-step generation.
+
+This script follows the ComfyUI approach of loading standalone model files:
+- GGUF transformer (quantized, ~9GB for Q4_K_M)
+- FP8 text encoder (~4.9GB)
+- Standalone VAE (~0.2GB)
+- LightX2V LoRA (~0.7GB)
+
+Total: ~15GB vs 28GB+ for full HuggingFace model
 """
 
 import argparse
+import gc
+import os
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -17,12 +28,12 @@ from PIL import Image
 from diffusers_utils import (
     get_device,
     get_torch_dtype,
-    enable_memory_optimization,
     create_progress_callback,
     get_pipeline_from_cache,
     set_pipeline_cache,
     clear_vram,
     print_memory_stats,
+    MODELS_DIR,
 )
 from utils import (
     load_style_config,
@@ -33,10 +44,45 @@ from utils import (
 )
 
 
-# Model IDs
-WAN_I2V_MODEL = "Wan-AI/Wan2.2-I2V-A14B-Diffusers"
-LIGHTX2V_LORA = "lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v"
-LIGHTX2V_LORA_FILENAME = "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors"
+# Standalone model files (ComfyUI approach)
+# These are separate files, not a full HuggingFace repository
+STANDALONE_MODELS = {
+    "gguf_transformer": {
+        "url": "https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF/resolve/main/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf",
+        "filename": "wan2.2_i2v_low_noise_14B_Q4_K_M.gguf",
+        "size_gb": 9.0,
+        "subdir": "diffusion_models",
+    },
+    "text_encoder": {
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "filename": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "size_gb": 4.9,
+        "subdir": "text_encoders",
+    },
+    "vae": {
+        "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+        "filename": "wan_2.1_vae.safetensors",
+        "size_gb": 0.2,
+        "subdir": "vae",
+    },
+    "lora": {
+        "url": "https://huggingface.co/lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v/resolve/main/loras/Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+        "filename": "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+        "size_gb": 0.7,
+        "subdir": "loras",
+    },
+}
+
+# Alternative GGUF variants
+GGUF_VARIANTS = {
+    "q2_k": ("wan2.2_i2v_low_noise_14B_Q2_K.gguf", 5.3, "fastest, lowest quality"),
+    "q3_k_m": ("wan2.2_i2v_low_noise_14B_Q3_K_M.gguf", 7.2, ""),
+    "q4_k_m": ("wan2.2_i2v_low_noise_14B_Q4_K_M.gguf", 9.0, "recommended for 10GB VRAM"),
+    "q5_k_m": ("wan2.2_i2v_low_noise_14B_Q5_K_M.gguf", 10.8, ""),
+    "q6_k": ("wan2.2_i2v_low_noise_14B_Q6_K.gguf", 12.0, "best quality"),
+    "q8_0": ("wan2.2_i2v_low_noise_14B_Q8_0.gguf", 15.4, "highest quality"),
+}
+DEFAULT_GGUF_VARIANT = "q4_k_m"
 
 # Resolution presets for different VRAM levels
 RESOLUTION_PRESETS = {
@@ -46,59 +92,210 @@ RESOLUTION_PRESETS = {
 }
 
 
-def load_wan_pipeline(use_lora: bool = True):
+def download_file(url: str, target: Path, desc: str = None) -> bool:
+    """Download a file with progress indication."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if target.exists():
+        print_status(f"Already exists: {target.name}", "success")
+        return True
+
+    desc = desc or target.name
+    print_status(f"Downloading {desc}...", "progress")
+
+    try:
+        urllib.request.urlretrieve(url, str(target))
+        print_status(f"Downloaded: {target.name}", "success")
+        return True
+    except Exception as e:
+        print_status(f"Failed to download {desc}: {e}", "error")
+        return False
+
+
+def get_model_path(model_key: str, gguf_variant: str = None) -> Path:
+    """Get path to a standalone model file, downloading if needed."""
+    if model_key == "gguf_transformer" and gguf_variant:
+        # Use specified GGUF variant
+        filename, size_gb, _ = GGUF_VARIANTS.get(gguf_variant, GGUF_VARIANTS[DEFAULT_GGUF_VARIANT])
+        url = f"https://huggingface.co/bullerwins/Wan2.2-I2V-A14B-GGUF/resolve/main/{filename}"
+        subdir = "diffusion_models"
+    else:
+        model_info = STANDALONE_MODELS[model_key]
+        filename = model_info["filename"]
+        url = model_info["url"]
+        subdir = model_info["subdir"]
+
+    target_dir = MODELS_DIR / "standalone" / subdir
+    target_path = target_dir / filename
+
+    if not target_path.exists():
+        download_file(url, target_path, filename)
+
+    return target_path
+
+
+def load_wan_pipeline(use_lora: bool = True, gguf_variant: str = None):
     """
-    Load WAN I2V pipeline with caching.
+    Load WAN I2V pipeline using standalone files (ComfyUI approach).
+
+    This loads individual component files instead of a full HuggingFace repository,
+    significantly reducing RAM requirements.
 
     Args:
-        use_lora: Whether to load LightX2V distillation LoRA
+        use_lora: Whether to load LightX2V distillation LoRA (8-step generation)
+        gguf_variant: GGUF quantization variant (default: q4_k_m)
 
     Returns:
         Loaded pipeline (cached for reuse)
     """
-    cache_key = "wan_i2v_lora" if use_lora else "wan_i2v"
+    if gguf_variant is None:
+        gguf_variant = DEFAULT_GGUF_VARIANT
+
+    cache_key = f"wan_i2v_standalone_{gguf_variant}" + ("_lora" if use_lora else "")
 
     # Check cache first
     cached_pipe = get_pipeline_from_cache(cache_key)
     if cached_pipe is not None:
         return cached_pipe
 
+    from diffusers import WanImageToVideoPipeline, WanTransformer3DModel, AutoencoderKLWan
+    from diffusers import GGUFQuantizationConfig, FlowMatchEulerDiscreteScheduler
+    from transformers import UMT5EncoderModel, AutoTokenizer
+    from safetensors.torch import load_file
+
     device = get_device()
-    dtype = get_torch_dtype(device)
+    print_status(f"Loading WAN 2.2 I2V (standalone files, {gguf_variant.upper()})...", "progress")
 
-    from diffusers import WanImageToVideoPipeline, AutoencoderKLWan
+    # Free memory before loading
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    print_status("Loading WAN 2.2 I2V pipeline...", "progress")
+    # Get paths to standalone files
+    gguf_path = get_model_path("gguf_transformer", gguf_variant)
+    text_encoder_path = get_model_path("text_encoder")
+    vae_path = get_model_path("vae")
 
-    # Load VAE in float32 for numerical stability
-    vae = AutoencoderKLWan.from_pretrained(
-        WAN_I2V_MODEL,
-        subfolder="vae",
+    # 1. Load GGUF transformer
+    # Load to CPU first, then move to appropriate device
+    print_status("Loading GGUF transformer...", "progress")
+
+    # Create quantization config with modules_to_not_convert to avoid None error
+    gguf_config = GGUFQuantizationConfig(compute_dtype=torch.bfloat16)
+
+    # Try loading with explicit CPU target first
+    try:
+        transformer = WanTransformer3DModel.from_single_file(
+            str(gguf_path),
+            quantization_config=gguf_config,
+            config="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+            subfolder="transformer",
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=False,  # Disable meta tensors
+        )
+    except Exception as e:
+        print_status(f"Standard GGUF loading failed: {e}", "warning")
+        print_status("Trying alternative loading method...", "progress")
+        # Fallback: load with simpler config
+        transformer = WanTransformer3DModel.from_single_file(
+            str(gguf_path),
+            quantization_config=gguf_config,
+        )
+
+    # 2. Load VAE from standalone file
+    print_status("Loading VAE...", "progress")
+    vae = AutoencoderKLWan.from_single_file(
+        str(vae_path),
         torch_dtype=torch.float32,
     )
 
-    # Load pipeline
-    pipe = WanImageToVideoPipeline.from_pretrained(
-        WAN_I2V_MODEL,
-        vae=vae,
-        torch_dtype=dtype,
+    # 3. Load FP8 text encoder from Comfy-Org standalone file
+    # This file is specifically formatted for WAN and contains FP8 quantized weights
+    print_status("Loading text encoder (FP8)...", "progress")
+
+    # Load the FP8 weights directly
+    fp8_state_dict = load_file(str(text_encoder_path))
+
+    # Convert FP8 weights to BF16 for compatibility with diffusers
+    converted_state_dict = {}
+    for key, tensor in fp8_state_dict.items():
+        if tensor.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+            # Scale FP8 back to BF16
+            converted_state_dict[key] = tensor.to(torch.bfloat16)
+        else:
+            converted_state_dict[key] = tensor
+    del fp8_state_dict
+    gc.collect()
+
+    # Create UMT5 config manually to avoid downloading from HuggingFace
+    from transformers import UMT5Config
+
+    # UMT5-XXL config (based on google/umt5-xxl)
+    umt5_config = UMT5Config(
+        vocab_size=250112,
+        d_model=4096,
+        d_kv=64,
+        d_ff=10240,
+        num_layers=24,
+        num_decoder_layers=24,
+        num_heads=64,
+        relative_attention_num_buckets=32,
+        relative_attention_max_distance=128,
+        dropout_rate=0.1,
+        layer_norm_epsilon=1e-6,
+        feed_forward_proj="gated-gelu",
+        is_encoder_decoder=True,
+        use_cache=True,
+        pad_token_id=0,
+        eos_token_id=1,
+        decoder_start_token_id=0,
     )
 
-    # Load LightX2V LoRA for fast generation
+    # Initialize model with config (no download)
+    text_encoder = UMT5EncoderModel(umt5_config)
+    text_encoder.load_state_dict(converted_state_dict, strict=False)
+    text_encoder = text_encoder.to(torch.bfloat16)
+    del converted_state_dict
+    gc.collect()
+    print_status("Text encoder loaded (FP8->BF16 conversion)", "success")
+
+    # 4. Load tokenizer from HuggingFace (small download, just tokenizer files)
+    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
+
+    # 5. Create scheduler
+    scheduler = FlowMatchEulerDiscreteScheduler(
+        num_train_timesteps=1000,
+        shift=8.0,  # Flow shift from ComfyUI workflow
+    )
+
+    # 6. Assemble pipeline
+    print_status("Assembling pipeline...", "progress")
+    pipe = WanImageToVideoPipeline(
+        vae=vae,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
+        transformer=transformer,
+        scheduler=scheduler,
+    )
+
+    # 7. Load LoRA if requested
     if use_lora:
-        print_status("Loading LightX2V distillation LoRA...", "progress")
+        print_status("Loading LightX2V LoRA...", "progress")
+        lora_path = get_model_path("lora")
         try:
             pipe.load_lora_weights(
-                LIGHTX2V_LORA,
-                weight_name=LIGHTX2V_LORA_FILENAME,
+                str(lora_path.parent),
+                weight_name=lora_path.name,
+                adapter_name="lightx2v",
             )
-            print_status("LightX2V LoRA loaded", "success")
+            pipe.set_adapters(["lightx2v"], adapter_weights=[1.25])
+            print_status("LightX2V LoRA loaded (8-step mode)", "success")
         except Exception as e:
-            print_status(f"Warning: Could not load LightX2V LoRA: {e}", "warning")
-            print_status("Using base model (slower, more steps needed)", "warning")
+            print_status(f"LoRA loading failed: {e}", "warning")
 
-    pipe = enable_memory_optimization(pipe)
-    print_status("WAN I2V pipeline loaded", "success")
+    # 8. Enable CPU offloading
+    pipe.enable_sequential_cpu_offload()
+    print_status("Pipeline loaded with sequential CPU offload", "success")
 
     # Cache for reuse
     set_pipeline_cache(cache_key, pipe)
@@ -121,10 +318,11 @@ def generate_video(
     height: Optional[int] = None,
     resolution_preset: Optional[str] = None,
     lora_strength: float = 1.25,
+    gguf_variant: Optional[str] = None,
     timeout: int = 600,
 ) -> str:
     """
-    Generate a video using WAN 2.2 via diffusers.
+    Generate a video using WAN 2.2 with standalone model files.
 
     Args:
         prompt: Text prompt describing the video content/motion
@@ -133,13 +331,14 @@ def generate_video(
         end_frame: Optional path to ending frame image (enables FLF2V mode)
         style_ref: Optional path to style configuration JSON
         length: Number of frames to generate (default 81 = ~5 seconds at 16fps)
-        steps: Number of sampling steps (default 8 with LightX2V distillation)
+        steps: Number of sampling steps (default 8 with LightX2V LoRA)
         cfg: Classifier-free guidance scale (default 1.0 with LightX2V LoRA)
         seed: Random seed (0 for random)
         width: Video width (overrides preset)
         height: Video height (overrides preset)
         resolution_preset: Resolution preset ("low", "medium", "high")
-        lora_strength: LightX2V LoRA strength (default 1.25 for I2V)
+        lora_strength: LightX2V LoRA strength (default 1.25)
+        gguf_variant: GGUF quantization variant (default: q4_k_m)
         timeout: Maximum time (kept for CLI compatibility)
 
     Returns:
@@ -148,13 +347,11 @@ def generate_video(
     # Validate inputs
     if not start_frame:
         if end_frame:
-            # If only end frame provided, treat as start frame
             start_frame = end_frame
             end_frame = None
             print_status("Using end frame as start frame for I2V", "info")
         else:
             print_status("Error: At least one frame (start_frame) is required", "error")
-            print_status("Text-to-video without frames is not yet supported", "error")
             sys.exit(1)
 
     # Apply resolution preset if specified
@@ -209,14 +406,16 @@ def generate_video(
     print_status(f"Prompt: {enhanced_prompt[:100]}...")
 
     # Load pipeline
-    pipe = load_wan_pipeline(use_lora=True)
+    pipe = load_wan_pipeline(use_lora=True, gguf_variant=gguf_variant)
 
-    # Set LoRA scale if using LoRA
+    # Check if LoRA is active and set strength
     try:
-        pipe.set_adapters(["default"], adapter_weights=[lora_strength])
-        print_status(f"LoRA strength set to: {lora_strength}")
+        active_adapters = pipe.get_active_adapters()
+        if active_adapters:
+            pipe.set_adapters(["lightx2v"], adapter_weights=[lora_strength])
+            print_status(f"LoRA strength set to: {lora_strength}")
     except Exception:
-        pass  # LoRA might not be loaded
+        pass
 
     # Set up generator for reproducibility
     device = get_device()
@@ -240,7 +439,7 @@ def generate_video(
         output = pipe(
             prompt=enhanced_prompt,
             image=start_image,
-            last_image=end_image,  # None for I2V, Image for FLF2V
+            last_image=end_image,
             height=height,
             width=width,
             num_frames=length,
@@ -256,7 +455,7 @@ def generate_video(
 
         # Ensure output path has .mp4 extension
         if not str(out_path).lower().endswith('.mp4'):
-            out_path = Path(str(out_path) + '.mp4') if not str(out_path).endswith('.') else Path(str(out_path) + 'mp4')
+            out_path = Path(str(out_path) + '.mp4')
 
         export_to_video(output, str(out_path), fps=16)
 
@@ -276,7 +475,7 @@ def generate_video(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate videos using WAN 2.2 via diffusers"
+        description="Generate videos using WAN 2.2 (standalone files approach)"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -347,6 +546,13 @@ def main():
         help="LightX2V LoRA strength (default: 1.25)"
     )
     parser.add_argument(
+        "--gguf",
+        dest="gguf_variant",
+        choices=list(GGUF_VARIANTS.keys()),
+        default=DEFAULT_GGUF_VARIANT,
+        help=f"GGUF quantization variant (default: {DEFAULT_GGUF_VARIANT})"
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=600,
@@ -369,6 +575,7 @@ def main():
         height=args.height,
         resolution_preset=args.preset,
         lora_strength=args.lora_strength,
+        gguf_variant=args.gguf_variant,
         timeout=args.timeout,
     )
 
