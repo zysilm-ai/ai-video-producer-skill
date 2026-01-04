@@ -351,7 +351,7 @@ class QwenImageGenerator:
         cfg: float = 1.0,
         shift: float = 5.0,
         style_config: dict = None,
-        timeout: int = 300,
+        timeout: int = 600,  # 10 min for multi-reference workflows with --cache-none
         free_memory: bool = False,
     ) -> str:
         """

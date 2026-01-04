@@ -388,8 +388,11 @@ def start_comfyui(comfyui_dir: Path, port: int = 8188):
     main_py = comfyui_dir / "main.py"
 
     try:
+        # --cache-none enables automatic unloading of text encoder after encoding
+        # This is critical for 10GB VRAM systems using multi-reference workflows
+        # Without it, Qwen VL 7B (~8GB) stays in VRAM and competes with diffusion model
         subprocess.run(
-            [sys.executable, str(main_py), "--listen", "0.0.0.0", "--port", str(port)],
+            [sys.executable, str(main_py), "--listen", "0.0.0.0", "--port", str(port), "--cache-none"],
             cwd=comfyui_dir,
         )
     except KeyboardInterrupt:
