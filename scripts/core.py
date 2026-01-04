@@ -62,14 +62,30 @@ T2I_WORKFLOW = WORKFLOW_DIR / "qwen_t2i.json"
 EDIT_WORKFLOW = WORKFLOW_DIR / "qwen_edit.json"
 POSE_WORKFLOW = WORKFLOW_DIR / "qwen_pose.json"
 DWPOSE_WORKFLOW = WORKFLOW_DIR / "dwpose_extract.json"
+MULTIANGLE_WORKFLOW = WORKFLOW_DIR / "qwen_multiangle.json"
+
+# Multi-Angle LoRA for camera control
+MULTIANGLE_LORA = "Qwen-Edit-MultiAngle.safetensors"
 
 
 # =============================================================================
 # Workflow Update Functions (preserved from qwen_image_comfyui.py)
 # =============================================================================
 
-def update_workflow_model(workflow: dict, model_name: str, lora_name: str) -> dict:
-    """Update model and LoRA names in workflow."""
+def update_workflow_model(
+    workflow: dict,
+    model_name: str,
+    lora_name: str,
+    angle_lora_name: str = None
+) -> dict:
+    """Update model and LoRA names in workflow.
+
+    Args:
+        workflow: Workflow dictionary
+        model_name: GGUF model filename
+        lora_name: Lightning LoRA filename
+        angle_lora_name: Optional Multi-Angle LoRA filename
+    """
     for node_id, node in workflow.items():
         if not isinstance(node, dict):
             continue
@@ -87,6 +103,13 @@ def update_workflow_model(workflow: dict, model_name: str, lora_name: str) -> di
             workflow[node_id]["inputs"]["lora_name"] = lora_name
         elif inputs.get("lora_name") == "{{LORA_NAME}}":
             workflow[node_id]["inputs"]["lora_name"] = lora_name
+
+        # Update Angle LoRA name
+        if angle_lora_name:
+            if "lora_name" in inputs and "{{ANGLE_LORA}}" in str(inputs.get("lora_name", "")):
+                workflow[node_id]["inputs"]["lora_name"] = angle_lora_name
+            elif inputs.get("lora_name") == "{{ANGLE_LORA}}":
+                workflow[node_id]["inputs"]["lora_name"] = angle_lora_name
 
     return workflow
 
@@ -120,26 +143,43 @@ def update_workflow_prompts(
 def update_workflow_images(
     workflow: dict,
     reference: str = None,
+    reference2: str = None,
+    reference3: str = None,
     pose: str = None
 ) -> dict:
-    """Update image inputs in workflow."""
+    """Update image inputs in workflow.
+
+    Supports up to 3 reference images for multi-character scenes:
+    - reference: image1 slot (background or character 1)
+    - reference2: image2 slot (character 1 or 2)
+    - reference3: image3 slot (character 2 or 3)
+    """
     for node_id, node in workflow.items():
         if not isinstance(node, dict):
             continue
 
         inputs = node.get("inputs", {})
-        title = node.get("_meta", {}).get("title", "").lower()
 
         if node.get("class_type") == "LoadImage":
             current_image = str(inputs.get("image", ""))
 
-            # Reference image
-            if "{{REFERENCE}}" in current_image or "reference" in title:
+            # Reference image 1 (primary)
+            if current_image == "{{REFERENCE}}":
                 if reference:
                     workflow[node_id]["inputs"]["image"] = reference
 
+            # Reference image 2
+            elif current_image == "{{REFERENCE2}}":
+                if reference2:
+                    workflow[node_id]["inputs"]["image"] = reference2
+
+            # Reference image 3
+            elif current_image == "{{REFERENCE3}}":
+                if reference3:
+                    workflow[node_id]["inputs"]["image"] = reference3
+
             # Pose image
-            if "{{POSE}}" in current_image or "pose" in title:
+            elif current_image == "{{POSE}}":
                 if pose:
                     workflow[node_id]["inputs"]["image"] = pose
 
@@ -301,6 +341,8 @@ class QwenImageGenerator:
         output_path: str,
         workflow_path: Path,
         reference_image: str = None,
+        reference_image2: str = None,
+        reference_image3: str = None,
         pose_image: str = None,
         control_strength: float = 0.9,
         width: int = None,
@@ -320,7 +362,9 @@ class QwenImageGenerator:
             prompt: Text prompt describing the image
             output_path: Path to save generated image
             workflow_path: Path to workflow JSON file
-            reference_image: Optional reference image for consistency
+            reference_image: Reference image 1 (background or character 1)
+            reference_image2: Reference image 2 (character 1 or 2)
+            reference_image3: Reference image 3 (character 2 or 3)
             pose_image: Optional pose image (skeleton) for ControlNet
             control_strength: ControlNet strength (0.0 - 1.0)
             width: Image width (or use preset)
@@ -367,11 +411,21 @@ class QwenImageGenerator:
 
         # Upload images if needed
         ref_image_name = None
+        ref_image_name2 = None
+        ref_image_name3 = None
         pose_image_name = None
 
         if reference_image:
             print_status("Uploading reference image to ComfyUI...", "progress")
             ref_image_name = self._upload_image(reference_image, "reference")
+
+        if reference_image2:
+            print_status("Uploading reference image 2 to ComfyUI...", "progress")
+            ref_image_name2 = self._upload_image(reference_image2, "reference2")
+
+        if reference_image3:
+            print_status("Uploading reference image 3 to ComfyUI...", "progress")
+            ref_image_name3 = self._upload_image(reference_image3, "reference3")
 
         if pose_image:
             print_status("Uploading pose image to ComfyUI...", "progress")
@@ -380,7 +434,7 @@ class QwenImageGenerator:
         # Update workflow with all parameters
         workflow = update_workflow_model(workflow, self.model_name, self.lora_name)
         workflow = update_workflow_prompts(workflow, enhanced_prompt)
-        workflow = update_workflow_images(workflow, ref_image_name, pose_image_name)
+        workflow = update_workflow_images(workflow, ref_image_name, ref_image_name2, ref_image_name3, pose_image_name)
         workflow = update_workflow_resolution(workflow, width, height)
         workflow = update_workflow_sampler(workflow, steps, cfg, seed, shift)
         workflow = update_workflow_controlnet(workflow, control_strength)

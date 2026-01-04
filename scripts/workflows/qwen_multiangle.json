@@ -59,26 +59,23 @@
       "title": "Lightning LoRA"
     }
   },
-  "30": {
-    "class_type": "ControlNetLoader",
+  "12": {
+    "class_type": "LoraLoader",
     "inputs": {
-      "control_net_name": "Qwen-Image-InstantX-ControlNet-Union.safetensors"
-    },
-    "_meta": {
-      "title": "Load ControlNet Union"
-    }
-  },
-  "31": {
-    "class_type": "SetUnionControlNetType",
-    "inputs": {
-      "control_net": [
-        "30",
+      "model": [
+        "11",
         0
       ],
-      "type": "openpose"
+      "clip": [
+        "11",
+        1
+      ],
+      "lora_name": "{{ANGLE_LORA}}",
+      "strength_model": 0.8,
+      "strength_clip": 0.8
     },
     "_meta": {
-      "title": "Set ControlNet Type to Pose"
+      "title": "Multi-Angle LoRA"
     }
   },
   "20": {
@@ -87,73 +84,14 @@
       "image": "{{REFERENCE}}"
     },
     "_meta": {
-      "title": "Reference Image 1 (Background or Character 1)"
-    }
-  },
-  "24": {
-    "class_type": "LoadImage",
-    "inputs": {
-      "image": "{{REFERENCE2}}"
-    },
-    "_meta": {
-      "title": "Reference Image 2 (Character 1 or 2)"
-    }
-  },
-  "25": {
-    "class_type": "LoadImage",
-    "inputs": {
-      "image": "{{REFERENCE3}}"
-    },
-    "_meta": {
-      "title": "Reference Image 3 (Character 2 or 3)"
-    }
-  },
-  "21": {
-    "class_type": "LoadImage",
-    "inputs": {
-      "image": "{{POSE}}"
-    },
-    "_meta": {
-      "title": "Pose Image"
-    }
-  },
-  "22": {
-    "class_type": "OpenposePreprocessor",
-    "inputs": {
-      "image": [
-        "21",
-        0
-      ],
-      "detect_hand": "enable",
-      "detect_body": "enable",
-      "detect_face": "disable",
-      "resolution": 832
-    },
-    "_meta": {
-      "title": "OpenPose Preprocessor"
-    }
-  },
-  "23": {
-    "class_type": "ImageScale",
-    "inputs": {
-      "image": [
-        "22",
-        0
-      ],
-      "upscale_method": "lanczos",
-      "width": 832,
-      "height": 480,
-      "crop": "disabled"
-    },
-    "_meta": {
-      "title": "Scale Pose to Generation Size"
+      "title": "Input Keyframe (to transform)"
     }
   },
   "4": {
     "class_type": "TextEncodeQwenImageEditPlus",
     "inputs": {
       "clip": [
-        "11",
+        "12",
         1
       ],
       "vae": [
@@ -164,18 +102,10 @@
         "20",
         0
       ],
-      "image2": [
-        "24",
-        0
-      ],
-      "image3": [
-        "25",
-        0
-      ],
       "prompt": "{{PROMPT}}"
     },
     "_meta": {
-      "title": "Positive Prompt with References"
+      "title": "Angle Transform Prompt"
     }
   },
   "5": {
@@ -183,7 +113,7 @@
     "inputs": {
       "text": "{{NEGATIVE_PROMPT}}",
       "clip": [
-        "11",
+        "12",
         1
       ]
     },
@@ -192,19 +122,24 @@
     }
   },
   "6": {
-    "class_type": "EmptySD3LatentImage",
+    "class_type": "EmptyQwenImageLayeredLatentImage",
     "inputs": {
       "width": 832,
       "height": 480,
+      "layers": 1,
       "batch_size": 1
     },
     "_meta": {
-      "title": "Empty SD3 Latent"
+      "title": "Empty Latent"
     }
   },
-  "32": {
-    "class_type": "ControlNetApplySD3",
+  "7": {
+    "class_type": "KSampler",
     "inputs": {
+      "model": [
+        "12",
+        0
+      ],
       "positive": [
         "4",
         0
@@ -212,41 +147,6 @@
       "negative": [
         "5",
         0
-      ],
-      "control_net": [
-        "31",
-        0
-      ],
-      "vae": [
-        "3",
-        0
-      ],
-      "image": [
-        "23",
-        0
-      ],
-      "strength": 0.9,
-      "start_percent": 0.0,
-      "end_percent": 1.0
-    },
-    "_meta": {
-      "title": "Apply ControlNet Pose"
-    }
-  },
-  "7": {
-    "class_type": "KSampler",
-    "inputs": {
-      "model": [
-        "11",
-        0
-      ],
-      "positive": [
-        "32",
-        0
-      ],
-      "negative": [
-        "32",
-        1
       ],
       "latent_image": [
         "6",
@@ -290,7 +190,7 @@
         "8",
         0
       ],
-      "filename_prefix": "qwen_pose"
+      "filename_prefix": "qwen_multiangle"
     },
     "_meta": {
       "title": "Save Image"

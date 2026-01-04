@@ -490,8 +490,10 @@ python {baseDir}/scripts/keyframe_generator.py \
   --output {output_dir}/keyframes/KF-A.png
 ```
 
-**Multi-character keyframe:**
+**Multi-character keyframe (no background):**
 ```bash
+# Up to 3 characters can be specified
+# Characters use image1, image2, image3 reference slots
 python {baseDir}/scripts/keyframe_generator.py \
   --prompt "On the left: [Character A action]. On the right: [Character B action]. [Scene context]" \
   --character {output_dir}/assets/characters/[character_a].png \
@@ -499,6 +501,28 @@ python {baseDir}/scripts/keyframe_generator.py \
   --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
   --output {output_dir}/keyframes/KF-B.png
 ```
+
+**Multi-character with background (RECOMMENDED for consistent scenes):**
+```bash
+# Background uses image1 slot, characters use image2/image3 slots
+# This ensures both character identity AND background consistency
+python {baseDir}/scripts/keyframe_generator.py \
+  --prompt "On the left: [Character A action]. On the right: [Character B action]. [Scene context]" \
+  --background {output_dir}/assets/backgrounds/[background_name].png \
+  --character {output_dir}/assets/characters/[character_a].png \
+  --character {output_dir}/assets/characters/[character_b].png \
+  --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
+  --output {output_dir}/keyframes/KF-B.png
+```
+
+**Reference Slot Allocation:**
+| Slot | Without --background | With --background |
+|------|---------------------|-------------------|
+| image1 | Character 1 | Background |
+| image2 | Character 2 | Character 1 |
+| image3 | Character 3 | Character 2 |
+
+**Note:** With `--background`, maximum 2 characters are supported (3 reference slots total).
 
 **Extract pose on-the-fly from reference image:**
 ```bash
@@ -784,7 +808,8 @@ python keyframe_generator.py --free-memory --character assets/hero.png --pose as
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
 | `asset_generator.py` | Generate reusable assets | `character`, `background`, `pose`, `style` subcommands |
-| `keyframe_generator.py` | Generate keyframes with identity+pose separation | `--prompt`, `--character`, `--pose`, `--output` |
+| `keyframe_generator.py` | Generate keyframes with identity+pose separation | `--prompt`, `--character`, `--background`, `--pose`, `--output` |
+| `angle_transformer.py` | Transform keyframe camera angles | `--input`, `--output`, `--rotate`, `--tilt`, `--zoom` |
 | `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output`, `--free-memory` |
 | `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
 
@@ -806,6 +831,43 @@ python keyframe_generator.py --free-memory --character assets/hero.png --pose as
 | **Single Character** | `keyframe_generator.py --character X --pose Y --prompt "..."` | Character with pose control |
 | **Multi-Character** | `keyframe_generator.py --character A --character B --pose Y --prompt "..."` | Up to 3 characters |
 | **Pose from Image** | `keyframe_generator.py --character X --pose-image ref.jpg --prompt "..."` | Extract pose on-the-fly |
+| **With Background** | `keyframe_generator.py --background B --character X --character Y ...` | Background + 2 chars |
+
+### Camera Angle Transformation
+
+For scenes requiring dynamic camera angles, use the angle transformer after generating keyframes:
+
+```bash
+# Transform keyframe to low angle shot
+python {baseDir}/scripts/angle_transformer.py \
+  --input {output_dir}/keyframes/KF-A.png \
+  --output {output_dir}/keyframes/KF-A-lowangle.png \
+  --tilt -30 \
+  --prompt "dramatic low angle action shot"
+
+# Rotate camera 45 degrees left
+python {baseDir}/scripts/angle_transformer.py \
+  --input {output_dir}/keyframes/KF-B.png \
+  --output {output_dir}/keyframes/KF-B-rotated.png \
+  --rotate -45
+
+# Wide angle with camera rotation
+python {baseDir}/scripts/angle_transformer.py \
+  --input {output_dir}/keyframes/KF-C.png \
+  --output {output_dir}/keyframes/KF-C-wide.png \
+  --rotate 30 \
+  --zoom wide
+```
+
+**Angle Transformer Parameters:**
+| Parameter | Range | Description |
+|-----------|-------|-------------|
+| `--rotate` | -180 to 180 | Horizontal rotation (negative = left) |
+| `--tilt` | -90 to 90 | Vertical tilt (negative = look up) |
+| `--zoom` | wide/normal/close | Lens type |
+| `--prompt` | text | Custom angle description (optional) |
+
+**Note:** Requires Multi-Angle LoRA. Run `setup_comfyui.py --models` to download.
 
 ### Video Generation Modes
 

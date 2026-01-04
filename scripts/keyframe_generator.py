@@ -148,8 +148,33 @@ def generate_keyframe(
     if free_memory:
         generator.free_memory()
 
-    # Determine workflow and reference strategy
-    primary_character = characters[0]
+    # Determine reference slot allocation strategy
+    # Supports up to 3 reference images:
+    #   - If background provided: image1=background, image2=char1, image3=char2
+    #   - If no background: image1=char1, image2=char2, image3=char3
+    if background:
+        ref1 = background
+        ref2 = characters[0] if len(characters) >= 1 else None
+        ref3 = characters[1] if len(characters) >= 2 else None
+        print_status("Reference allocation: background + characters")
+        print_status(f"  image1 (background): {background}")
+        if ref2:
+            print_status(f"  image2 (character 1): {ref2}")
+        if ref3:
+            print_status(f"  image3 (character 2): {ref3}")
+        if len(characters) > 2:
+            print_status(f"Warning: Only 2 characters supported with background (ignoring {len(characters)-2})", "warning")
+    else:
+        ref1 = characters[0] if len(characters) >= 1 else None
+        ref2 = characters[1] if len(characters) >= 2 else None
+        ref3 = characters[2] if len(characters) >= 3 else None
+        print_status("Reference allocation: characters only")
+        if ref1:
+            print_status(f"  image1 (character 1): {ref1}")
+        if ref2:
+            print_status(f"  image2 (character 2): {ref2}")
+        if ref3:
+            print_status(f"  image3 (character 3): {ref3}")
 
     # Build enhanced prompt with character context
     char_names = [Path(c).stem for c in characters]
@@ -167,14 +192,15 @@ def generate_keyframe(
         # Use pose workflow with ControlNet
         workflow_path = POSE_WORKFLOW
         print_status("Mode: Pose-controlled keyframe generation")
-        print_status(f"Character identity: {primary_character}")
         print_status(f"Pose skeleton: {skeleton_path}")
 
         result = generator.generate(
             prompt=enhanced_prompt,
             output_path=output_path,
             workflow_path=workflow_path,
-            reference_image=primary_character,
+            reference_image=ref1,
+            reference_image2=ref2,
+            reference_image3=ref3,
             pose_image=skeleton_path,
             control_strength=control_strength,
             seed=seed,
@@ -185,13 +211,14 @@ def generate_keyframe(
         # Use edit workflow with just character reference
         workflow_path = EDIT_WORKFLOW
         print_status("Mode: Reference-guided keyframe generation (no pose control)")
-        print_status(f"Character identity: {primary_character}")
 
         result = generator.generate(
             prompt=enhanced_prompt,
             output_path=output_path,
             workflow_path=workflow_path,
-            reference_image=primary_character,
+            reference_image=ref1,
+            reference_image2=ref2,
+            reference_image3=ref3,
             seed=seed,
             style_config=style_config,
             free_memory=False,

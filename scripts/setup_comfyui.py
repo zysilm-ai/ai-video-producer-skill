@@ -45,6 +45,7 @@ CUSTOM_NODES = {
     "ComfyUI-GGUF": "https://github.com/city96/ComfyUI-GGUF.git",
     "ComfyUI-VideoHelperSuite": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
     "ComfyUI-Manager": "https://github.com/ltdrdata/ComfyUI-Manager.git",
+    "comfyui_controlnet_aux": "https://github.com/Fannovel16/comfyui_controlnet_aux.git",
 }
 
 # Model URLs and paths (relative to ComfyUI/models/)
@@ -97,6 +98,20 @@ MODELS = {
         "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
         "size_gb": 0.8,
         "required": True,
+    },
+    # === CONTROLNET FOR POSE ===
+    # Qwen ControlNet Union (supports pose, depth, canny, soft edge)
+    "controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets/resolve/main/split_files/controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors",
+        "size_gb": 3.4,
+        "required": True,
+    },
+    # === MULTI-ANGLE LORA ===
+    # dx8152 Multi-Angle LoRA for camera angle transformation
+    "loras/Qwen-Edit-MultiAngle.safetensors": {
+        "url": "https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles/resolve/main/%E9%95%9C%E5%A4%B4%E8%BD%AC%E6%8D%A2.safetensors",
+        "size_gb": 0.8,
+        "required": False,  # Optional for angle transforms
     },
 }
 
