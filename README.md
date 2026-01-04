@@ -202,7 +202,15 @@ python scripts/asset_generator.py background \
   --description "[environment description]" \
   --output path/to/background.png
 
-# Pose skeleton (extract from ANY reference image)
+# Pose reference + skeleton (RECOMMENDED - generates clean image for reliable extraction)
+python scripts/asset_generator.py pose-ref \
+  --name [pose_name] \
+  --pose "[pose description, e.g., 'fighting stance, fists raised']" \
+  --output path/to/pose_ref.png \
+  --extract-skeleton \
+  --skeleton-output path/to/pose_skeleton.png
+
+# Pose skeleton from existing image (may fail on complex images)
 python scripts/asset_generator.py pose \
   --source path/to/reference_image.jpg \
   --output path/to/pose_skeleton.png
@@ -225,12 +233,44 @@ python scripts/keyframe_generator.py \
   --character path/to/character.png      # Character identity (WHO)
   --pose path/to/pose_skeleton.png       # Pose skeleton (WHAT position)
   [--pose-image path/to/ref.jpg]         # Extract pose on-the-fly
+  [--background path/to/background.png]  # Background reference
   [--control-strength 0.8]               # ControlNet strength
   [--preset low|medium|high]             # Resolution preset
   [--free-memory]                        # Clear VRAM before generation
 ```
 
 **Key Principle:** Separate identity (--character) from pose (--pose) to generate the same character in dramatically different poses.
+
+**Multi-Character Generation:**
+
+```bash
+# Two characters (up to 3 supported)
+python scripts/keyframe_generator.py \
+  --prompt "On the left: warrior attacking. On the right: ninja defending." \
+  --character assets/warrior.png \
+  --character assets/ninja.png \
+  --pose assets/poses/combat_skeleton.png \
+  --output keyframes/KF-battle.png
+
+# Two characters with background reference
+python scripts/keyframe_generator.py \
+  --prompt "Warriors facing off in temple courtyard" \
+  --background assets/backgrounds/temple.png \
+  --character assets/warrior.png \
+  --character assets/ninja.png \
+  --pose assets/poses/standoff_skeleton.png \
+  --output keyframes/KF-standoff.png
+```
+
+**Reference Slot Allocation:**
+
+| Slot | Without --background | With --background |
+|------|---------------------|-------------------|
+| image1 | Character 1 | Background |
+| image2 | Character 2 | Character 1 |
+| image3 | Character 3 | Character 2 |
+
+**Note:** With `--background`, maximum 2 characters are supported (3 reference slots total).
 
 ### wan_video_comfyui.py
 
@@ -253,6 +293,37 @@ python scripts/wan_video_comfyui.py \
 |------|-----------|----------|
 | I2V | `--start-frame` only | Continuous motion from single frame |
 | FLF2V | `--start-frame` + `--end-frame` | Precise control over motion |
+
+### angle_transformer.py
+
+Transform keyframe camera angles without regenerating the base image.
+
+```bash
+python scripts/angle_transformer.py \
+  --input path/to/keyframe.png \
+  --output path/to/transformed.png \
+  [--rotate -45]                    # Horizontal rotation (-180 to 180)
+  [--tilt -30]                      # Vertical tilt (-90 to 90)
+  [--zoom wide|normal|close]        # Lens type
+  [--prompt "custom angle desc"]    # Override auto-generated description
+```
+
+**Examples:**
+
+```bash
+# Low angle dramatic shot
+python scripts/angle_transformer.py \
+  --input keyframes/KF-A.png \
+  --output keyframes/KF-A-lowangle.png \
+  --tilt -30
+
+# Rotated wide shot
+python scripts/angle_transformer.py \
+  --input keyframes/KF-B.png \
+  --output keyframes/KF-B-wide.png \
+  --rotate 45 \
+  --zoom wide
+```
 
 ### setup_comfyui.py
 
@@ -287,6 +358,7 @@ gemini-video-producer-skill/
 ├── scripts/
 │   ├── asset_generator.py      # Generate character/background/pose/style assets
 │   ├── keyframe_generator.py   # Generate keyframes with identity+pose separation
+│   ├── angle_transformer.py    # Transform keyframe camera angles
 │   ├── wan_video_comfyui.py    # Video generation (ComfyUI)
 │   ├── setup_comfyui.py        # ComfyUI setup and server management
 │   ├── core.py                 # Shared generation utilities
@@ -296,6 +368,7 @@ gemini-video-producer-skill/
 │       ├── qwen_t2i.json       # Text-to-Image
 │       ├── qwen_edit.json      # Edit with reference
 │       ├── qwen_pose.json      # Pose-guided generation
+│       ├── qwen_multiangle.json # Camera angle transformation
 │       ├── dwpose_extract.json # Skeleton extraction
 │       ├── wan_i2v.json        # Image-to-Video
 │       └── wan_flf2v.json      # First-Last-Frame-to-Video
@@ -308,6 +381,33 @@ gemini-video-producer-skill/
 │   └── troubleshooting.md
 └── outputs/                    # Your generated content
 ```
+
+### Output Directory Structure (Per Project)
+
+When generating videos, the workflow creates this structure:
+
+```
+outputs/my-project/
+├── philosophy.md              # Production philosophy
+├── style.json                 # Style configuration
+├── scene-breakdown.md         # Scene plan with unique keyframes
+├── assets.json                # Asset definitions
+├── assets/
+│   ├── characters/           # Character identity assets
+│   ├── backgrounds/          # Environment references
+│   ├── poses/                # Skeleton files
+│   └── styles/               # Style references
+├── keyframes/                # Centralized unique keyframes
+│   ├── KF-A.png              # Scene 1 start
+│   ├── KF-B.png              # Scene 1 end = Scene 2 start (SHARED)
+│   └── KF-C.png              # Scene 2 end
+├── scene-01/
+│   └── video.mp4
+└── scene-02/
+    └── video.mp4
+```
+
+**Shared Keyframes:** Adjacent scenes share boundary keyframes for perfect continuity. For example, KF-B serves as both the end frame of Scene 1 and the start frame of Scene 2. Generate once, use in both scenes.
 
 ---
 
