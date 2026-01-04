@@ -1,0 +1,207 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "{{MODEL_NAME}}"
+    },
+    "_meta": {
+      "title": "Load Qwen Image Edit GGUF"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "sd3"
+    },
+    "_meta": {
+      "title": "Load Qwen VL Text Encoder"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Load Qwen VAE"
+    }
+  },
+  "10": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": ["1", 0],
+      "shift": 5.0
+    },
+    "_meta": {
+      "title": "Flow Matching"
+    }
+  },
+  "11": {
+    "class_type": "LoraLoader",
+    "inputs": {
+      "model": ["10", 0],
+      "clip": ["2", 0],
+      "lora_name": "{{LORA_NAME}}",
+      "strength_model": 1.0,
+      "strength_clip": 1.0
+    },
+    "_meta": {
+      "title": "Lightning LoRA"
+    }
+  },
+  "30": {
+    "class_type": "ControlNetLoader",
+    "inputs": {
+      "control_net_name": "Qwen-Image-InstantX-ControlNet-Union.safetensors"
+    },
+    "_meta": {
+      "title": "Load ControlNet Union"
+    }
+  },
+  "31": {
+    "class_type": "SetUnionControlNetType",
+    "inputs": {
+      "control_net": ["30", 0],
+      "type": "openpose"
+    },
+    "_meta": {
+      "title": "Set ControlNet Type to Pose"
+    }
+  },
+  "20": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{REFERENCE}}"
+    },
+    "_meta": {
+      "title": "Reference Image (Character Identity)"
+    }
+  },
+  "21": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{POSE}}"
+    },
+    "_meta": {
+      "title": "Pose Image"
+    }
+  },
+  "22": {
+    "class_type": "OpenposePreprocessor",
+    "inputs": {
+      "image": ["21", 0],
+      "detect_hand": "enable",
+      "detect_body": "enable",
+      "detect_face": "disable",
+      "resolution": 832
+    },
+    "_meta": {
+      "title": "OpenPose Preprocessor"
+    }
+  },
+  "23": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": ["22", 0],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Scale Pose to Generation Size"
+    }
+  },
+  "4": {
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "inputs": {
+      "clip": ["11", 1],
+      "vae": ["3", 0],
+      "image1": ["20", 0],
+      "prompt": "{{PROMPT}}"
+    },
+    "_meta": {
+      "title": "Positive Prompt with Reference"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "{{NEGATIVE_PROMPT}}",
+      "clip": ["11", 1]
+    },
+    "_meta": {
+      "title": "Negative Prompt"
+    }
+  },
+  "6": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 832,
+      "height": 480,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty SD3 Latent"
+    }
+  },
+  "32": {
+    "class_type": "ControlNetApplySD3",
+    "inputs": {
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "control_net": ["31", 0],
+      "vae": ["3", 0],
+      "image": ["23", 0],
+      "strength": 0.9,
+      "start_percent": 0.0,
+      "end_percent": 1.0
+    },
+    "_meta": {
+      "title": "Apply ControlNet Pose"
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["11", 0],
+      "positive": ["32", 0],
+      "negative": ["32", 1],
+      "latent_image": ["6", 0],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "8": {
+    "class_type": "VAEDecodeTiled",
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["3", 0],
+      "tile_size": 256,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 8
+    },
+    "_meta": {
+      "title": "VAE Decode (Tiled)"
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["8", 0],
+      "filename_prefix": "qwen_pose"
+    },
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

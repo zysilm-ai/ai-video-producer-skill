@@ -73,6 +73,31 @@ MODELS = {
         "size_gb": 0.7,
         "required": True,
     },
+    # === QWEN IMAGE EDIT 2511 MODELS ===
+    # Qwen Image Edit 2511 GGUF (Q4_K_M for balanced quality/speed)
+    "diffusion_models/qwen-image-edit-2511-Q4_K_M.gguf": {
+        "url": "https://huggingface.co/unsloth/Qwen-Image-Edit-2511-GGUF/resolve/main/qwen-image-edit-2511-Q4_K_M.gguf",
+        "size_gb": 13.1,
+        "required": True,
+    },
+    # Qwen VL Text Encoder (FP8)
+    "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "size_gb": 8.1,
+        "required": True,
+    },
+    # Qwen Image VAE
+    "vae/qwen_image_vae.safetensors": {
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+        "size_gb": 0.2,
+        "required": True,
+    },
+    # Qwen Lightning LoRA (4-step fast generation)
+    "loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors": {
+        "url": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "size_gb": 0.8,
+        "required": True,
+    },
 }
 
 

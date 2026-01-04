@@ -368,6 +368,8 @@ class ComfyUIClient:
             Execution result from history
         """
         start_time = time.time()
+        last_history_check = 0
+        history_check_interval = 3.0  # Check history every 3 seconds
 
         # Use WebSocket for real-time updates
         ws_url = f"ws://{self.host}:{self.port}/ws?clientId={self.client_id}"
@@ -381,6 +383,16 @@ class ComfyUIClient:
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
                     raise TimeoutError(f"Workflow timed out after {timeout}s")
+
+                # Periodic history check to catch completion even if websocket misses it
+                if elapsed - last_history_check >= history_check_interval:
+                    last_history_check = elapsed
+                    try:
+                        history = self.get_history(prompt_id)
+                        if prompt_id in history and "outputs" in history[prompt_id]:
+                            break
+                    except Exception:
+                        pass  # Ignore errors, continue with websocket
 
                 try:
                     message = ws.recv()
@@ -411,15 +423,31 @@ class ComfyUIClient:
 
                 except websocket.WebSocketTimeoutException:
                     # Check if job completed - first check queue, then history
-                    if not self.is_prompt_in_queue(prompt_id):
+                    in_queue = self.is_prompt_in_queue(prompt_id)
+
+                    if not in_queue:
                         # Job not in queue - check history for results
                         history = self.get_history(prompt_id)
                         if prompt_id in history:
                             break
                         # If not in queue AND not in history, wait a bit for history to populate
-                        time.sleep(1)
+                        time.sleep(0.5)
                         history = self.get_history(prompt_id)
                         if prompt_id in history:
+                            break
+                        # Still not in history - wait longer and try again
+                        time.sleep(1.5)
+                        history = self.get_history(prompt_id)
+                        if prompt_id in history:
+                            break
+
+                    # Also check history even if in queue - might have completed between checks
+                    # This handles race condition where completion message was missed
+                    history = self.get_history(prompt_id)
+                    if prompt_id in history:
+                        result_status = history[prompt_id].get("status", {})
+                        # Only break if status indicates completion (not still running)
+                        if result_status.get("completed", False) or "outputs" in history[prompt_id]:
                             break
 
             ws.close()
