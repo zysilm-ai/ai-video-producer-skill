@@ -1,6 +1,8 @@
-# Gemini Video Producer Skill
+# AI Video Producer
 
-A Claude Code skill for complete AI video production workflows using Google Gemini and Veo APIs.
+A skill for complete AI video production workflows using local diffusion models (Qwen Image Edit + WAN).
+######### CURRENTLY UNDER HEAVY DEVELOPMENT ###########
+######### WE WILL ALSO RELEASE A VERSION WHICH HELPS YOU PROMPT ON GEMINI API / WEB INTERFACE. PLEASE WAITE PATIENTLY ##########
 
 ## Overview
 
