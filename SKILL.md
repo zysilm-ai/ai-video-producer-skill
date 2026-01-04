@@ -104,6 +104,43 @@ The server must be running at `http://127.0.0.1:8188` for generation scripts to 
 - Reproducible - same pipeline.json = same commands executed
 - Traceable - status tracking in pipeline.json
 
+## Pipeline Modes
+
+The pipeline supports two execution modes:
+
+### Keyframe-First Mode (Default)
+Generate all keyframes first, then generate videos between keyframe pairs (FLF2V mode).
+
+```
+KF-A ─────────────→ Scene 1 ←───────────── KF-B
+                                            │
+KF-B ─────────────→ Scene 2 ←───────────── KF-C
+```
+
+**Pros:** Precise control over start and end frames
+**Cons:** Each keyframe generated independently can cause background inconsistency
+
+### Video-First Mode (Recommended for continuity)
+Generate only the first keyframe, then generate videos sequentially using I2V mode.
+Each video's last frame becomes the next scene's start keyframe.
+
+```
+KF-A (generated) → Scene 1 → KF-B (extracted) → Scene 2 → KF-C (extracted)
+```
+
+**Pros:** Perfect visual continuity between scenes (same camera, lighting, position)
+**Cons:** Less control over specific end poses
+
+## Pipeline Mode Selection (REQUIRED - Ask First)
+
+**Before starting any work, ask the user which pipeline mode to use:**
+
+Use AskUserQuestion with these options:
+- **"Video-First (Recommended)"** - Best for visual continuity. Only first keyframe is generated; subsequent keyframes are extracted from video last frames.
+- **"Keyframe-First"** - Best when you need precise control over specific end poses. All keyframes generated independently.
+
+**Default recommendation:** Video-First solves background inconsistency issues between scenes.
+
 ## Standard Checkpoint Format (ALL PHASES)
 
 **Every checkpoint uses the same pattern:**
@@ -124,14 +161,30 @@ The server must be running at `http://127.0.0.1:8188` for generation scripts to 
 
 ## Workflow Phases (MUST COMPLETE IN ORDER)
 
+### Keyframe-First Mode
+
 | Phase | LLM Actions | Required Outputs | Checkpoint |
 |-------|-------------|------------------|------------|
+| 0. Mode Selection | Ask user which pipeline mode | User's choice | **Ask before starting** |
 | 1. Production Philosophy | Create visual identity & style | `philosophy.md`, `style.json` | User approval |
 | 2. Scene Breakdown | Plan scenes & keyframes | `scene-breakdown.md` | User approval |
 | 3. Pipeline Generation | Generate ALL prompts | `pipeline.json` | User approval |
 | 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | LLM reviews with VLM, user approval |
 | 5. Keyframe Execution | Run `execute_pipeline.py --stage keyframes` | `keyframes/*.png` | LLM reviews with VLM, user approval |
 | 6. Video Execution | Run `execute_pipeline.py --stage videos` | `scene-*/video.mp4` | User approval |
+| 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off |
+
+### Video-First Mode (Recommended)
+
+| Phase | LLM Actions | Required Outputs | Checkpoint |
+|-------|-------------|------------------|------------|
+| 0. Mode Selection | Ask user which pipeline mode | User's choice | **Ask before starting** |
+| 1. Production Philosophy | Create visual identity & style | `philosophy.md`, `style.json` | User approval |
+| 2. Scene Breakdown | Plan scenes with motion prompts | `scene-breakdown.md` | User approval |
+| 3. Pipeline Generation | Generate prompts with video-first schema | `pipeline.json` | User approval |
+| 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | LLM reviews with VLM, user approval |
+| 5. First Keyframe | Run `execute_pipeline.py --stage first_keyframe` | `keyframes/KF-A.png` | LLM reviews with VLM, user approval |
+| 6. Scene Execution | Run `execute_pipeline.py --stage scenes` | `scene-*/video.mp4` + extracted keyframes | User approval |
 | 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off |
 
 ---
@@ -475,7 +528,11 @@ This phase consolidates all prompts into a single structured file that will be e
 
 ### Step 3.1: Create pipeline.json
 
-Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create a complete pipeline.json:
+Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create a complete pipeline.json.
+
+**Choose the schema based on your pipeline mode:**
+
+#### Keyframe-First Schema (Default)
 
 ```json
 {
@@ -517,6 +574,7 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
   "keyframes": [
     {
       "id": "KF-A",
+      "type": "character",
       "prompt": "Scene description with character positions and actions...",
       "background": "<background_id>",
       "characters": ["<character_id_1>", "<character_id_2>"],
@@ -542,6 +600,68 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
   ]
 }
 ```
+
+#### Video-First Schema (Recommended for continuity)
+
+```json
+{
+  "version": "2.0",
+  "project_name": "project-name",
+
+  "metadata": {
+    "created_at": "ISO timestamp",
+    "philosophy_file": "philosophy.md",
+    "style_file": "style.json",
+    "scene_breakdown_file": "scene-breakdown.md"
+  },
+
+  "assets": {
+    "characters": { ... },
+    "backgrounds": { ... },
+    "poses": { ... }
+  },
+
+  "first_keyframe": {
+    "id": "KF-A",
+    "type": "landscape",
+    "prompt": "First scene starting point - detailed visual description...",
+    "background": "<background_id>",
+    "characters": [],
+    "pose": null,
+    "settings": {
+      "preset": "medium"
+    },
+    "output": "keyframes/KF-A.png",
+    "status": "pending"
+  },
+
+  "scenes": [
+    {
+      "id": "scene-01",
+      "motion_prompt": "Motion description - what happens in this scene...",
+      "start_keyframe": "KF-A",
+      "output_video": "scene-01/video.mp4",
+      "output_keyframe": "keyframes/KF-B.png",
+      "status": "pending"
+    },
+    {
+      "id": "scene-02",
+      "motion_prompt": "Motion description for scene 2...",
+      "start_keyframe": "KF-B",
+      "output_video": "scene-02/video.mp4",
+      "output_keyframe": "keyframes/KF-C.png",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+**Video-First Schema Key Differences:**
+- `first_keyframe`: Single object (not array) - only the first keyframe is generated traditionally
+- `scenes`: Array replacing `videos` - each scene uses I2V mode (start frame only)
+- `motion_prompt`: Describes what happens during the scene (no end frame)
+- `output_keyframe`: Where to save the extracted last frame (becomes next scene's start)
+- `start_keyframe`: References either `first_keyframe.id` or previous scene's extracted keyframe
 
 ### Step 3.2: Pipeline Prompt Writing Guidelines
 
@@ -1008,24 +1128,48 @@ Adjacent scenes share boundary keyframes (e.g., KF-B is used by both Scene 1 and
 
 ## TodoWrite Template
 
-At the START of the workflow, create this todo list:
+At the START of the workflow, create this todo list based on your pipeline mode:
+
+### Keyframe-First Mode
 
 ```
-1. Check ComfyUI setup and start server
-2. Create philosophy.md
-3. Create style.json
-4. Get user approval on production philosophy
-5. Create scene-breakdown.md with unique keyframes table
-6. Get user approval on scene breakdown
-7. Create pipeline.json with ALL prompts (assets, keyframes, videos)
-8. Get user approval on pipeline.json
-9. Execute asset stage: python execute_pipeline.py pipeline.json --stage assets
-10. Review assets with VLM, get user approval
-11. Execute keyframe stage: python execute_pipeline.py pipeline.json --stage keyframes
-12. Review keyframes with VLM, get user approval
-13. Execute video stage: python execute_pipeline.py pipeline.json --stage videos
-14. Get user approval on videos
-15. Provide final summary to user
+1. Ask user: Video-First or Keyframe-First? (user chose Keyframe-First)
+2. Check ComfyUI setup and start server
+3. Create philosophy.md
+4. Create style.json
+5. Get user approval on production philosophy
+6. Create scene-breakdown.md with unique keyframes table
+7. Get user approval on scene breakdown
+8. Create pipeline.json with ALL prompts (assets, keyframes, videos)
+9. Get user approval on pipeline.json
+10. Execute asset stage: python execute_pipeline.py pipeline.json --stage assets
+11. Review assets with VLM, get user approval
+12. Execute keyframe stage: python execute_pipeline.py pipeline.json --stage keyframes
+13. Review keyframes with VLM, get user approval
+14. Execute video stage: python execute_pipeline.py pipeline.json --stage videos
+15. Get user approval on videos
+16. Provide final summary to user
+```
+
+### Video-First Mode (Recommended)
+
+```
+1. Ask user: Video-First or Keyframe-First? (user chose Video-First)
+2. Check ComfyUI setup and start server
+3. Create philosophy.md
+4. Create style.json
+5. Get user approval on production philosophy
+6. Create scene-breakdown.md with motion prompts (no end keyframes)
+7. Get user approval on scene breakdown
+8. Create pipeline.json with video-first schema (first_keyframe + scenes)
+9. Get user approval on pipeline.json
+10. Execute asset stage: python execute_pipeline.py pipeline.json --stage assets
+11. Review assets with VLM, get user approval
+12. Execute first keyframe: python execute_pipeline.py pipeline.json --stage first_keyframe
+13. Review first keyframe with VLM, get user approval
+14. Execute scenes: python execute_pipeline.py pipeline.json --stage scenes
+15. Get user approval on videos (keyframes auto-extracted between scenes)
+16. Provide final summary to user
 ```
 
 **Key points:**
@@ -1033,6 +1177,7 @@ At the START of the workflow, create this todo list:
 - User approves the complete plan before execution
 - execute_pipeline.py handles VRAM management automatically
 - LLM reviews outputs with VLM after each stage
+- Video-first mode extracts last frames automatically for scene continuity
 
 ### Auto-Setup Check (Step 1)
 
@@ -1098,11 +1243,21 @@ python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --en
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
+| `execute_pipeline.py` | Execute complete pipeline | `--stage`, `--all`, `--status`, `--validate`, `--regenerate` |
 | `asset_generator.py` | Generate reusable assets | `character`, `background`, `pose`, `style` subcommands |
 | `keyframe_generator.py` | Generate keyframes with identity+pose separation | `--prompt`, `--character`, `--background`, `--pose`, `--output` |
 | `angle_transformer.py` | Transform keyframe camera angles | `--input`, `--output`, `--rotate`, `--tilt`, `--zoom` |
 | `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output`, `--free-memory` |
 | `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
+
+### Pipeline Execution
+
+| Stage | Keyframe-First | Video-First |
+|-------|----------------|-------------|
+| Assets | `--stage assets` | `--stage assets` |
+| Keyframes | `--stage keyframes` | `--stage first_keyframe` |
+| Videos | `--stage videos` | `--stage scenes` |
+| All stages | `--all` | `--all` |
 
 **Remember:** Use `--free-memory` when switching between image and video generation!
 

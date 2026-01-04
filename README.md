@@ -6,14 +6,21 @@ A Claude Code skill for complete AI video production workflows using **WAN 2.1**
 
 This skill guides you through creating professional AI-generated videos with a structured, iterative workflow:
 
+0. **Pipeline Mode Selection** - Choose Video-First (recommended) or Keyframe-First
 1. **Production Philosophy** - Define visual style, motion language, and narrative approach
-2. **Scene Breakdown** - Decompose video into scenes with keyframe requirements
+2. **Scene Breakdown** - Decompose video into scenes with motion requirements
 3. **Asset Generation** - Create reusable character, background, and pose assets
-4. **Keyframe Generation** - Create start/end frames with visual consistency
-5. **Video Synthesis** - Generate video segments using WAN 2.1
-6. **Review & Iterate** - Refine based on feedback
+4. **Keyframe/Video Generation** - Execute pipeline deterministically via `execute_pipeline.py`
+5. **Review & Iterate** - Refine based on feedback
 
 The philosophy-first approach ensures visual coherence across all scenes, resulting in professional, cohesive videos.
+
+### Pipeline Modes
+
+| Mode | Description | Best For |
+|------|-------------|----------|
+| **Video-First** (Recommended) | Generate first keyframe only, then videos sequentially. Last frame of each video becomes next scene's start. | Visual continuity between scenes |
+| **Keyframe-First** | Generate all keyframes independently, then videos between them. | Precise control over end poses |
 
 ## Key Features
 
@@ -188,6 +195,40 @@ The skill uses ComfyUI with GGUF quantized models for efficient GPU memory usage
 ---
 
 ## Script Reference
+
+### execute_pipeline.py
+
+Execute a complete pipeline.json file deterministically.
+
+```bash
+# Check pipeline status
+python scripts/execute_pipeline.py output/project/pipeline.json --status
+
+# Validate pipeline structure
+python scripts/execute_pipeline.py output/project/pipeline.json --validate
+
+# Execute specific stage (video-first mode)
+python scripts/execute_pipeline.py output/project/pipeline.json --stage assets
+python scripts/execute_pipeline.py output/project/pipeline.json --stage first_keyframe
+python scripts/execute_pipeline.py output/project/pipeline.json --stage scenes
+
+# Execute specific stage (keyframe-first mode)
+python scripts/execute_pipeline.py output/project/pipeline.json --stage assets
+python scripts/execute_pipeline.py output/project/pipeline.json --stage keyframes
+python scripts/execute_pipeline.py output/project/pipeline.json --stage videos
+
+# Execute all stages with review pauses
+python scripts/execute_pipeline.py output/project/pipeline.json --all
+
+# Regenerate a specific item
+python scripts/execute_pipeline.py output/project/pipeline.json --regenerate KF-A
+```
+
+The pipeline executor automatically:
+- Detects pipeline mode (video-first or keyframe-first) from schema
+- Manages VRAM by using `--free-memory` appropriately
+- Tracks status in pipeline.json
+- Extracts last frames for video-first scene continuity
 
 ### asset_generator.py
 
@@ -364,6 +405,7 @@ gemini-video-producer-skill/
 ├── README.md                   # This file
 ├── SETUP.md                    # Detailed diffusers setup (legacy)
 ├── scripts/
+│   ├── execute_pipeline.py     # Pipeline executor (deterministic execution)
 │   ├── asset_generator.py      # Generate character/background/pose/style assets
 │   ├── keyframe_generator.py   # Generate keyframes with identity+pose separation
 │   ├── angle_transformer.py    # Transform keyframe camera angles
@@ -398,24 +440,26 @@ When generating videos, the workflow creates this structure:
 outputs/my-project/
 ├── philosophy.md              # Production philosophy
 ├── style.json                 # Style configuration
-├── scene-breakdown.md         # Scene plan with unique keyframes
-├── assets.json                # Asset definitions
+├── scene-breakdown.md         # Scene plan
+├── pipeline.json              # Execution pipeline (all prompts)
 ├── assets/
 │   ├── characters/           # Character identity assets
 │   ├── backgrounds/          # Environment references
 │   ├── poses/                # Skeleton files
 │   └── styles/               # Style references
-├── keyframes/                # Centralized unique keyframes
-│   ├── KF-A.png              # Scene 1 start
-│   ├── KF-B.png              # Scene 1 end = Scene 2 start (SHARED)
-│   └── KF-C.png              # Scene 2 end
+├── keyframes/                # Generated/extracted keyframes
+│   ├── KF-A.png              # First keyframe (generated)
+│   ├── KF-B.png              # Extracted from scene-01 (video-first)
+│   └── KF-C.png              # Extracted from scene-02 (video-first)
 ├── scene-01/
 │   └── video.mp4
 └── scene-02/
     └── video.mp4
 ```
 
-**Shared Keyframes:** Adjacent scenes share boundary keyframes for perfect continuity. For example, KF-B serves as both the end frame of Scene 1 and the start frame of Scene 2. Generate once, use in both scenes.
+**Video-First Mode:** Only KF-A is generated traditionally. KF-B, KF-C, etc. are automatically extracted from the last frame of each video, ensuring perfect visual continuity between scenes.
+
+**Keyframe-First Mode:** All keyframes are generated independently, then videos interpolate between them.
 
 ---
 

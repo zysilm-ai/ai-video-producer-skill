@@ -33,6 +33,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
+import cv2
+
 
 class PipelineExecutor:
     """Executes a pipeline.json file for AI video production."""
@@ -82,11 +84,76 @@ class PipelineExecutor:
 
     def _update_video_status(self, video_id: str, status: str):
         """Update status for a video."""
-        for video in self.pipeline["videos"]:
+        for video in self.pipeline.get("videos", []):
             if video["id"] == video_id:
                 video["status"] = status
                 self._save_pipeline()
                 return
+
+    def _update_first_keyframe_status(self, status: str):
+        """Update status for the first keyframe (video-first mode)."""
+        if "first_keyframe" in self.pipeline:
+            self.pipeline["first_keyframe"]["status"] = status
+            self._save_pipeline()
+
+    def _update_scene_status(self, scene_id: str, status: str):
+        """Update status for a scene (video-first mode)."""
+        for scene in self.pipeline.get("scenes", []):
+            if scene["id"] == scene_id:
+                scene["status"] = status
+                self._save_pipeline()
+                return
+
+    def _extract_last_frame(self, video_path: str, output_path: str) -> bool:
+        """
+        Extract the last frame from a video file.
+
+        Args:
+            video_path: Path to input video
+            output_path: Path to save extracted frame
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                print(f"    [FAIL] Could not open video: {video_path}")
+                return False
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total_frames <= 0:
+                print(f"    [FAIL] Video has no frames: {video_path}")
+                cap.release()
+                return False
+
+            # Seek to last frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames - 1)
+            ret, frame = cap.read()
+
+            # If last frame is mostly black, try second-to-last
+            if ret and frame is not None and frame.mean() < 10:
+                print(f"    [WARN] Last frame appears black, trying second-to-last")
+                cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames - 2)
+                ret, frame = cap.read()
+
+            cap.release()
+
+            if not ret or frame is None:
+                print(f"    [FAIL] Could not read frame from video")
+                return False
+
+            # Ensure output directory exists
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+            # Save frame as PNG
+            cv2.imwrite(output_path, frame)
+            print(f"    [OK] Extracted last frame to: {Path(output_path).name}")
+            return True
+
+        except Exception as e:
+            print(f"    [FAIL] Frame extraction error: {e}")
+            return False
 
     def _run_command(self, cmd: List[str], description: str) -> bool:
         """Run a command and return success status."""
@@ -393,6 +460,194 @@ class PipelineExecutor:
 
         print("\n--- Videos stage complete ---")
 
+    def execute_first_keyframe(self):
+        """Generate the first keyframe only (video-first mode)."""
+        print("\n" + "=" * 60)
+        print("STAGE: FIRST KEYFRAME (video-first mode)")
+        print("=" * 60)
+
+        first_kf = self.pipeline.get("first_keyframe")
+        if not first_kf:
+            print("  [ERROR] No 'first_keyframe' found in pipeline")
+            print("  This pipeline may use the old keyframe-first schema.")
+            return
+
+        kf_id = first_kf["id"]
+
+        if first_kf.get("status") in ["generated", "approved"]:
+            print(f"  [{first_kf['status']}] {kf_id} - skipping")
+            print("\n--- First keyframe stage complete ---")
+            return
+
+        output_path = self.output_dir / first_kf["output"]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Determine keyframe type
+        kf_type = first_kf.get("type", "character")
+
+        if kf_type == "landscape":
+            # Landscape keyframes use asset_generator.py background mode
+            cmd = [
+                sys.executable,
+                str(self.scripts_dir / "asset_generator.py"),
+                "background",
+                "--name", kf_id,
+                "--description", first_kf["prompt"],
+                "--output", str(output_path),
+                "--free-memory"
+            ]
+        else:
+            # Character keyframes use keyframe_generator.py
+            cmd = [
+                sys.executable,
+                str(self.scripts_dir / "keyframe_generator.py"),
+                "--free-memory",
+                "--prompt", first_kf["prompt"],
+                "--output", str(output_path)
+            ]
+
+            # Add background reference if specified
+            if first_kf.get("background"):
+                bg_id = first_kf["background"]
+                bg_data = self.pipeline.get("assets", {}).get("backgrounds", {}).get(bg_id, {})
+                if bg_data:
+                    bg_path = self.output_dir / bg_data["output"]
+                    cmd.extend(["--background", str(bg_path)])
+
+            # Add character references
+            for char_id in first_kf.get("characters", []):
+                char_data = self.pipeline.get("assets", {}).get("characters", {}).get(char_id, {})
+                if char_data:
+                    char_path = self.output_dir / char_data["output"]
+                    cmd.extend(["--character", str(char_path)])
+
+            # Add pose reference
+            if first_kf.get("pose"):
+                pose_id = first_kf["pose"]
+                pose_data = self.pipeline.get("assets", {}).get("poses", {}).get(pose_id, {})
+                if pose_data:
+                    pose_path = self.output_dir / pose_data["output"]
+                    cmd.extend(["--pose", str(pose_path)])
+
+            # Add settings
+            settings = first_kf.get("settings", {})
+            if "control_strength" in settings:
+                cmd.extend(["--control-strength", str(settings["control_strength"])])
+            if "preset" in settings:
+                cmd.extend(["--preset", settings["preset"]])
+
+        print(f"  [pending] {kf_id} ({kf_type}) - generating...")
+        if self._run_command(cmd, f"first keyframe {kf_id}"):
+            self._update_first_keyframe_status("generated")
+        else:
+            self._update_first_keyframe_status("failed")
+
+        print("\n--- First keyframe stage complete ---")
+
+    def execute_scenes(self):
+        """Generate all scenes sequentially (video-first mode).
+
+        For each scene:
+        1. Use start keyframe (from first_keyframe or previous scene's output)
+        2. Generate video with I2V mode
+        3. Extract last frame as next scene's start keyframe
+        """
+        print("\n" + "=" * 60)
+        print("STAGE: SCENES (video-first mode)")
+        print("=" * 60)
+
+        scenes = self.pipeline.get("scenes", [])
+        if not scenes:
+            print("  [ERROR] No 'scenes' found in pipeline")
+            print("  This pipeline may use the old keyframe-first schema.")
+            return
+
+        print(f"\n--- Scenes ({len(scenes)} items) ---")
+
+        # Build keyframe lookup: keyframe_id -> file path
+        keyframe_paths = {}
+
+        # First keyframe
+        first_kf = self.pipeline.get("first_keyframe")
+        if first_kf:
+            keyframe_paths[first_kf["id"]] = self.output_dir / first_kf["output"]
+
+        # Output keyframes from scenes (populated as we generate)
+        for scene in scenes:
+            if scene.get("output_keyframe"):
+                # Map the output keyframe to a pseudo-ID based on scene
+                # The next scene's start_keyframe references this
+                scene_idx = scenes.index(scene)
+                if scene_idx < len(scenes) - 1:
+                    next_scene = scenes[scene_idx + 1]
+                    next_start_kf = next_scene.get("start_keyframe")
+                    if next_start_kf:
+                        keyframe_paths[next_start_kf] = self.output_dir / scene["output_keyframe"]
+
+        first_video = True
+        for scene in scenes:
+            scene_id = scene["id"]
+
+            if scene.get("status") in ["generated", "approved"]:
+                print(f"  [{scene['status']}] {scene_id} - skipping")
+                first_video = False
+                continue
+
+            # Get start keyframe path
+            start_kf_id = scene.get("start_keyframe")
+            start_frame_path = keyframe_paths.get(start_kf_id)
+
+            if not start_frame_path or not start_frame_path.exists():
+                print(f"  [ERROR] {scene_id}: start keyframe '{start_kf_id}' not found at {start_frame_path}")
+                self._update_scene_status(scene_id, "failed")
+                print("  Stopping scene execution (sequential dependency)")
+                return
+
+            # Video output path
+            video_output = self.output_dir / scene["output_video"]
+            video_output.parent.mkdir(parents=True, exist_ok=True)
+
+            # Build video generation command (I2V mode only)
+            cmd = [
+                sys.executable,
+                str(self.scripts_dir / "wan_video_comfyui.py"),
+                "--prompt", scene["motion_prompt"],
+                "--start-frame", str(start_frame_path),
+                "--output", str(video_output)
+            ]
+
+            # Add --free-memory only for first video
+            if first_video:
+                cmd.insert(2, "--free-memory")
+                first_video = False
+
+            print(f"  [pending] {scene_id} - generating video...")
+            if not self._run_command(cmd, f"scene video {scene_id}"):
+                self._update_scene_status(scene_id, "failed")
+                print("  Stopping scene execution (sequential dependency)")
+                return
+
+            # Extract last frame for next scene
+            if scene.get("output_keyframe"):
+                kf_output = self.output_dir / scene["output_keyframe"]
+                kf_output.parent.mkdir(parents=True, exist_ok=True)
+
+                print(f"    Extracting last frame for next scene...")
+                if not self._extract_last_frame(str(video_output), str(kf_output)):
+                    print(f"    [WARN] Failed to extract keyframe, next scene may fail")
+
+                # Update keyframe_paths for subsequent scenes
+                scene_idx = scenes.index(scene)
+                if scene_idx < len(scenes) - 1:
+                    next_scene = scenes[scene_idx + 1]
+                    next_start_kf = next_scene.get("start_keyframe")
+                    if next_start_kf:
+                        keyframe_paths[next_start_kf] = kf_output
+
+            self._update_scene_status(scene_id, "generated")
+
+        print("\n--- Scenes stage complete ---")
+
     def regenerate(self, item_id: str):
         """Regenerate a specific item by ID."""
         print(f"\nRegenerating: {item_id}")
@@ -447,6 +702,10 @@ class PipelineExecutor:
         print("=" * 60)
         print(f"Pipeline file: {self.pipeline_path}")
         print(f"Output dir: {self.output_dir}")
+
+        # Detect mode
+        is_video_first = "first_keyframe" in self.pipeline or "scenes" in self.pipeline
+        print(f"Mode: {'video-first' if is_video_first else 'keyframe-first'}")
         print()
 
         def count_statuses(items: dict | list) -> dict:
@@ -455,6 +714,11 @@ class PipelineExecutor:
             else:
                 statuses = [item.get("status", "unknown") for item in items]
             return {s: statuses.count(s) for s in set(statuses)}
+
+        def status_icon(status: str) -> str:
+            return "+" if status == "approved" else \
+                   "o" if status == "generated" else \
+                   "x" if status == "failed" else "."
 
         # Assets
         print("ASSETS:")
@@ -465,29 +729,47 @@ class PipelineExecutor:
                 status_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
                 print(f"  {section}: {len(items)} items ({status_str})")
 
-        # Keyframes
-        keyframes = self.pipeline.get("keyframes", [])
-        if keyframes:
-            counts = count_statuses(keyframes)
-            status_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
-            print(f"\nKEYFRAMES: {len(keyframes)} items ({status_str})")
-            for kf in keyframes:
-                status_icon = "+" if kf.get("status") == "approved" else \
-                             "o" if kf.get("status") == "generated" else \
-                             "x" if kf.get("status") == "failed" else "."
-                print(f"  [{status_icon}] {kf['id']}")
+        if is_video_first:
+            # Video-first mode
+            first_kf = self.pipeline.get("first_keyframe")
+            if first_kf:
+                icon = status_icon(first_kf.get("status", "pending"))
+                kf_type = first_kf.get("type", "character")
+                print(f"\nFIRST KEYFRAME:")
+                print(f"  [{icon}] {first_kf['id']} ({kf_type})")
 
-        # Videos
-        videos = self.pipeline.get("videos", [])
-        if videos:
-            counts = count_statuses(videos)
-            status_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
-            print(f"\nVIDEOS: {len(videos)} items ({status_str})")
-            for video in videos:
-                status_icon = "+" if video.get("status") == "approved" else \
-                             "o" if video.get("status") == "generated" else \
-                             "x" if video.get("status") == "failed" else "."
-                print(f"  [{status_icon}] {video['id']}")
+            scenes = self.pipeline.get("scenes", [])
+            if scenes:
+                counts = count_statuses(scenes)
+                status_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+                print(f"\nSCENES: {len(scenes)} items ({status_str})")
+                for scene in scenes:
+                    icon = status_icon(scene.get("status", "pending"))
+                    start_kf = scene.get("start_keyframe", "?")
+                    output_kf = scene.get("output_keyframe", "")
+                    kf_info = f"{start_kf}"
+                    if output_kf:
+                        kf_info += f" -> {Path(output_kf).stem}"
+                    print(f"  [{icon}] {scene['id']} ({kf_info})")
+        else:
+            # Keyframe-first mode (legacy)
+            keyframes = self.pipeline.get("keyframes", [])
+            if keyframes:
+                counts = count_statuses(keyframes)
+                status_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+                print(f"\nKEYFRAMES: {len(keyframes)} items ({status_str})")
+                for kf in keyframes:
+                    icon = status_icon(kf.get("status", "pending"))
+                    print(f"  [{icon}] {kf['id']}")
+
+            videos = self.pipeline.get("videos", [])
+            if videos:
+                counts = count_statuses(videos)
+                status_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+                print(f"\nVIDEOS: {len(videos)} items ({status_str})")
+                for video in videos:
+                    icon = status_icon(video.get("status", "pending"))
+                    print(f"  [{icon}] {video['id']}")
 
         print()
 
@@ -499,6 +781,31 @@ class PipelineExecutor:
         # Check required fields
         if "project_name" not in self.pipeline:
             errors.append("Missing 'project_name'")
+
+        # Detect pipeline mode
+        is_video_first = "first_keyframe" in self.pipeline or "scenes" in self.pipeline
+        is_keyframe_first = "keyframes" in self.pipeline or "videos" in self.pipeline
+
+        if is_video_first and is_keyframe_first:
+            print("  [WARN] Pipeline has both video-first and keyframe-first elements")
+
+        if is_video_first:
+            errors.extend(self._validate_video_first())
+        else:
+            errors.extend(self._validate_keyframe_first())
+
+        if errors:
+            print("VALIDATION FAILED:")
+            for error in errors:
+                print(f"  - {error}")
+            return False
+        else:
+            print("VALIDATION PASSED")
+            return True
+
+    def _validate_keyframe_first(self) -> List[str]:
+        """Validate keyframe-first (legacy) schema."""
+        errors = []
 
         # Check asset references in keyframes
         for kf in self.pipeline.get("keyframes", []):
@@ -527,14 +834,75 @@ class PipelineExecutor:
             if video.get("end_keyframe") and video["end_keyframe"] not in keyframe_ids:
                 errors.append(f"Video {video['id']}: end_keyframe '{video['end_keyframe']}' not found")
 
-        if errors:
-            print("VALIDATION FAILED:")
-            for error in errors:
-                print(f"  - {error}")
-            return False
+        return errors
+
+    def _validate_video_first(self) -> List[str]:
+        """Validate video-first schema."""
+        errors = []
+
+        # Validate first_keyframe
+        first_kf = self.pipeline.get("first_keyframe")
+        if not first_kf:
+            errors.append("Missing 'first_keyframe' in video-first pipeline")
         else:
-            print("VALIDATION PASSED")
-            return True
+            if "id" not in first_kf:
+                errors.append("first_keyframe: missing 'id'")
+            if "prompt" not in first_kf:
+                errors.append("first_keyframe: missing 'prompt'")
+            if "output" not in first_kf:
+                errors.append("first_keyframe: missing 'output'")
+
+            # Check asset references
+            if first_kf.get("background"):
+                bg_id = first_kf["background"]
+                if bg_id not in self.pipeline.get("assets", {}).get("backgrounds", {}):
+                    errors.append(f"first_keyframe: background '{bg_id}' not found")
+
+            for char_id in first_kf.get("characters", []):
+                if char_id not in self.pipeline.get("assets", {}).get("characters", {}):
+                    errors.append(f"first_keyframe: character '{char_id}' not found")
+
+            if first_kf.get("pose"):
+                pose_id = first_kf["pose"]
+                if pose_id not in self.pipeline.get("assets", {}).get("poses", {}):
+                    errors.append(f"first_keyframe: pose '{pose_id}' not found")
+
+        # Validate scenes
+        scenes = self.pipeline.get("scenes", [])
+        if not scenes:
+            errors.append("Missing 'scenes' in video-first pipeline")
+        else:
+            # Build valid keyframe IDs (first_keyframe + output_keyframes from previous scenes)
+            valid_keyframe_ids = set()
+            if first_kf and first_kf.get("id"):
+                valid_keyframe_ids.add(first_kf["id"])
+
+            for i, scene in enumerate(scenes):
+                scene_id = scene.get("id", f"scene-{i}")
+
+                if "motion_prompt" not in scene:
+                    errors.append(f"Scene {scene_id}: missing 'motion_prompt'")
+                if "output_video" not in scene:
+                    errors.append(f"Scene {scene_id}: missing 'output_video'")
+
+                # Check start_keyframe reference
+                start_kf = scene.get("start_keyframe")
+                if not start_kf:
+                    errors.append(f"Scene {scene_id}: missing 'start_keyframe'")
+                elif start_kf not in valid_keyframe_ids:
+                    errors.append(f"Scene {scene_id}: start_keyframe '{start_kf}' not available at this point")
+
+                # Add this scene's output_keyframe to valid IDs for subsequent scenes
+                if scene.get("output_keyframe"):
+                    # The output_keyframe becomes available for the next scene
+                    # We use a derived ID based on scene index
+                    if i < len(scenes) - 1:
+                        next_scene = scenes[i + 1]
+                        next_start = next_scene.get("start_keyframe")
+                        if next_start:
+                            valid_keyframe_ids.add(next_start)
+
+        return errors
 
 
 def main():
@@ -543,16 +911,27 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Keyframe-first mode (legacy):
   python execute_pipeline.py pipeline.json --stage assets
   python execute_pipeline.py pipeline.json --stage keyframes
   python execute_pipeline.py pipeline.json --stage videos
   python execute_pipeline.py pipeline.json --all
+
+  # Video-first mode:
+  python execute_pipeline.py pipeline.json --stage assets
+  python execute_pipeline.py pipeline.json --stage first_keyframe
+  python execute_pipeline.py pipeline.json --stage scenes
+  python execute_pipeline.py pipeline.json --all
+
+  # Other commands:
   python execute_pipeline.py pipeline.json --regenerate KF-B
   python execute_pipeline.py pipeline.json --status
+  python execute_pipeline.py pipeline.json --validate
         """
     )
     parser.add_argument("pipeline", help="Path to pipeline.json")
-    parser.add_argument("--stage", choices=["assets", "keyframes", "videos"],
+    parser.add_argument("--stage",
+                       choices=["assets", "keyframes", "videos", "first_keyframe", "scenes"],
                        help="Execute specific stage")
     parser.add_argument("--all", action="store_true",
                        help="Execute all stages sequentially")
@@ -573,6 +952,9 @@ Examples:
 
     executor = PipelineExecutor(args.pipeline, args.base_dir)
 
+    # Detect pipeline mode
+    is_video_first = "first_keyframe" in executor.pipeline or "scenes" in executor.pipeline
+
     if args.status:
         executor.status()
     elif args.validate:
@@ -583,23 +965,51 @@ Examples:
     elif args.stage == "assets":
         executor.execute_assets()
     elif args.stage == "keyframes":
+        if is_video_first:
+            print("ERROR: This is a video-first pipeline. Use --stage first_keyframe instead.")
+            sys.exit(1)
         executor.execute_keyframes()
     elif args.stage == "videos":
+        if is_video_first:
+            print("ERROR: This is a video-first pipeline. Use --stage scenes instead.")
+            sys.exit(1)
         executor.execute_videos()
+    elif args.stage == "first_keyframe":
+        if not is_video_first:
+            print("ERROR: This is a keyframe-first pipeline. Use --stage keyframes instead.")
+            sys.exit(1)
+        executor.execute_first_keyframe()
+    elif args.stage == "scenes":
+        if not is_video_first:
+            print("ERROR: This is a keyframe-first pipeline. Use --stage videos instead.")
+            sys.exit(1)
+        executor.execute_scenes()
     elif args.all:
         executor.execute_assets()
         print("\n" + "-" * 60)
-        print("Assets complete. Review before continuing to keyframes.")
+        print("Assets complete. Review before continuing.")
         print("-" * 60)
-        input("Press Enter to continue to keyframes...")
+        input("Press Enter to continue...")
 
-        executor.execute_keyframes()
-        print("\n" + "-" * 60)
-        print("Keyframes complete. Review before continuing to videos.")
-        print("-" * 60)
-        input("Press Enter to continue to videos...")
+        if is_video_first:
+            # Video-first mode
+            executor.execute_first_keyframe()
+            print("\n" + "-" * 60)
+            print("First keyframe complete. Review before continuing to scenes.")
+            print("-" * 60)
+            input("Press Enter to continue to scenes...")
 
-        executor.execute_videos()
+            executor.execute_scenes()
+        else:
+            # Keyframe-first mode (legacy)
+            executor.execute_keyframes()
+            print("\n" + "-" * 60)
+            print("Keyframes complete. Review before continuing to videos.")
+            print("-" * 60)
+            input("Press Enter to continue to videos...")
+
+            executor.execute_videos()
+
         print("\n" + "-" * 60)
         print("All stages complete!")
         print("-" * 60)
