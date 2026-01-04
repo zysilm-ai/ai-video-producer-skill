@@ -76,15 +76,29 @@ Keep this running in the background. The server must be running for generation.
 ### 3. Generate!
 
 ```bash
-# Generate a keyframe image
-python scripts/qwen_image_comfyui.py \
-  --prompt "A warrior in dramatic lighting, anime style" \
-  --output outputs/keyframe.png
+# Step 1: Generate character asset (neutral A-pose, clean background)
+python scripts/asset_generator.py character \
+  --name warrior \
+  --description "A warrior in dramatic lighting, anime style, red armor" \
+  --output outputs/assets/warrior.png
 
-# Generate a video from the keyframe
+# Step 2: Generate pose skeleton from reference image
+python scripts/asset_generator.py pose \
+  --source references/charge_pose.jpg \
+  --output outputs/assets/charge_skeleton.png
+
+# Step 3: Generate keyframe with character + pose
+python scripts/keyframe_generator.py \
+  --prompt "Warrior charging forward, cape flowing, dramatic lighting" \
+  --character outputs/assets/warrior.png \
+  --pose outputs/assets/charge_skeleton.png \
+  --output outputs/keyframes/KF-A.png
+
+# Step 4: Generate a video from the keyframe
 python scripts/wan_video_comfyui.py \
+  --free-memory \
   --prompt "The warrior charges forward, cape flowing" \
-  --start-frame outputs/keyframe.png \
+  --start-frame outputs/keyframes/KF-A.png \
   --output outputs/video.mp4
 ```
 
@@ -171,28 +185,52 @@ The skill uses ComfyUI with GGUF quantized models for efficient GPU memory usage
 
 ## Script Reference
 
-### qwen_image_comfyui.py
+### asset_generator.py
 
-Generate keyframe images using Qwen Image Edit 2511.
+Generate reusable assets for keyframe generation.
 
 ```bash
-python scripts/qwen_image_comfyui.py \
-  --prompt "Description of the image" \
-  --output path/to/output.png \
-  [--reference path/to/reference.png]  # For edit mode
-  [--pose path/to/pose.png]            # For pose-guided mode
-  [--control-strength 0.9]             # ControlNet strength
-  [--preset low|medium|high]           # Resolution preset
-  [--seed 0]                           # Random seed
+# Character identity (neutral A-pose, clean white background)
+python scripts/asset_generator.py character \
+  --name [character_name] \
+  --description "[detailed character description]" \
+  --output path/to/character.png
+
+# Background (no people, environment only)
+python scripts/asset_generator.py background \
+  --name [background_name] \
+  --description "[environment description]" \
+  --output path/to/background.png
+
+# Pose skeleton (extract from ANY reference image)
+python scripts/asset_generator.py pose \
+  --source path/to/reference_image.jpg \
+  --output path/to/pose_skeleton.png
+
+# Style reference
+python scripts/asset_generator.py style \
+  --name [style_name] \
+  --description "[style description]" \
+  --output path/to/style.png
 ```
 
-**Generation Modes:**
+### keyframe_generator.py
 
-| Mode | Arguments | Use Case |
-|------|-----------|----------|
-| T2I | No reference | Initial keyframe, establishing shots |
-| Edit | `--reference` | Maintain consistency with existing image |
-| Pose | `--reference` + `--pose` | Change pose while keeping identity |
+Generate keyframes using character assets and pose control.
+
+```bash
+python scripts/keyframe_generator.py \
+  --prompt "Action/scene description" \
+  --output path/to/keyframe.png \
+  --character path/to/character.png      # Character identity (WHO)
+  --pose path/to/pose_skeleton.png       # Pose skeleton (WHAT position)
+  [--pose-image path/to/ref.jpg]         # Extract pose on-the-fly
+  [--control-strength 0.8]               # ControlNet strength
+  [--preset low|medium|high]             # Resolution preset
+  [--free-memory]                        # Clear VRAM before generation
+```
+
+**Key Principle:** Separate identity (--character) from pose (--pose) to generate the same character in dramatically different poses.
 
 ### wan_video_comfyui.py
 
@@ -247,15 +285,18 @@ gemini-video-producer-skill/
 ├── README.md                   # This file
 ├── SETUP.md                    # Detailed diffusers setup (legacy)
 ├── scripts/
-│   ├── qwen_image_comfyui.py   # Image generation (ComfyUI)
+│   ├── asset_generator.py      # Generate character/background/pose/style assets
+│   ├── keyframe_generator.py   # Generate keyframes with identity+pose separation
 │   ├── wan_video_comfyui.py    # Video generation (ComfyUI)
 │   ├── setup_comfyui.py        # ComfyUI setup and server management
+│   ├── core.py                 # Shared generation utilities
 │   ├── comfyui_client.py       # ComfyUI API client
 │   ├── utils.py                # Shared utilities
 │   └── workflows/              # ComfyUI workflow JSON files
 │       ├── qwen_t2i.json       # Text-to-Image
 │       ├── qwen_edit.json      # Edit with reference
 │       ├── qwen_pose.json      # Pose-guided generation
+│       ├── dwpose_extract.json # Skeleton extraction
 │       ├── wan_i2v.json        # Image-to-Video
 │       └── wan_flf2v.json      # First-Last-Frame-to-Video
 ├── comfyui/                    # ComfyUI installation (gitignored)

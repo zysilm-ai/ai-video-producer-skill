@@ -374,28 +374,39 @@ mkdir -p {output_dir}/assets/styles
 mkdir -p {output_dir}/assets/objects
 ```
 
-**Generate each asset using T2I mode:**
+**Generate each asset using `asset_generator.py`:**
+
 ```bash
-# Character identity (use detailed description)
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "Portrait of [character description], neutral pose, clean background" \
+# Character identity (neutral A-pose, clean white background)
+python {baseDir}/scripts/asset_generator.py character \
+  --name [character_name] \
+  --description "[detailed character description]" \
   --output {output_dir}/assets/characters/[name].png
 
-# Background (use detailed environment description)
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "[Background description], no people, establishing shot" \
+# Background (no people, establishing shot)
+python {baseDir}/scripts/asset_generator.py background \
+  --name [background_name] \
+  --description "[detailed environment description]" \
   --output {output_dir}/assets/backgrounds/[name].png
 
-# Pose reference (simple figure showing pose)
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "Simple figure demonstrating [pose description], minimal background" \
-  --output {output_dir}/assets/poses/[name].png
+# Pose skeleton (extract from ANY reference image - photo, artwork, etc.)
+# The skeleton is a stick figure - it does NOT contain character appearance
+python {baseDir}/scripts/asset_generator.py pose \
+  --source [path/to/reference_image.jpg] \
+  --output {output_dir}/assets/poses/[pose_name]_skeleton.png
 
 # Style reference (example image in target style)
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "Example scene in [style description] style, demonstration of artistic style" \
+python {baseDir}/scripts/asset_generator.py style \
+  --name [style_name] \
+  --description "[style description]" \
   --output {output_dir}/assets/styles/[name].png
 ```
+
+**IMPORTANT - Pose Assets:**
+- Pose assets are **skeletons only** (stick figures on black background)
+- They are extracted from reference images using DWPose
+- They do NOT contain any character appearance - only body position
+- This allows applying any pose to any character without identity leakage
 
 ### Step 2.5.4: CHECKPOINT - Get User Approval
 
@@ -463,83 +474,68 @@ mkdir -p {output_dir}/scene-02
 # ... for each scene
 ```
 
-### Step 3.2: Character Scene Generation (type: character)
+### Step 3.2: Generate Keyframes with `keyframe_generator.py`
 
-**Character scenes use a 3-step composite flow:**
+**Use `keyframe_generator.py` which properly separates:**
+- **Identity** (WHO) - from `--character` asset
+- **Pose** (WHAT position) - from `--pose` skeleton
+- **Action** (WHAT happening) - from `--prompt`
 
-```
-Step 1: Generate Background Layer
-         ↓
-Step 2: Generate Character Layer (with pose)
-         ↓
-Step 3: Composite Layers Together
-         ↓
-Output: keyframe-start.png
-```
-
-**Step 1 - Generate Background Layer:**
+**Single character keyframe:**
 ```bash
-# Use background asset OR chain from previous scene
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "[Background description], [style] style, no people, establishing shot" \
-  --reference {output_dir}/assets/backgrounds/[background_name].png \
-  --output {output_dir}/scene-01/layers/background.png
+python {baseDir}/scripts/keyframe_generator.py \
+  --prompt "[Action description], [expression], [environment context]" \
+  --character {output_dir}/assets/characters/[character_name].png \
+  --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
+  --output {output_dir}/keyframes/KF-A.png
 ```
 
-**Step 2 - Generate Character Layer (with pose transfer):**
+**Multi-character keyframe:**
 ```bash
-# Character identity + pose reference
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "[Character] in [pose description], [expression], transparent background" \
-  --reference {output_dir}/assets/characters/[character_name].png \
-  --pose {output_dir}/assets/poses/[pose_name].png \
-  --control-strength 0.8 \
-  --output {output_dir}/scene-01/layers/character.png
+python {baseDir}/scripts/keyframe_generator.py \
+  --prompt "On the left: [Character A action]. On the right: [Character B action]. [Scene context]" \
+  --character {output_dir}/assets/characters/[character_a].png \
+  --character {output_dir}/assets/characters/[character_b].png \
+  --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
+  --output {output_dir}/keyframes/KF-B.png
 ```
 
-**Step 3 - Composite Layers:**
+**Extract pose on-the-fly from reference image:**
 ```bash
-# Combine background + character into final keyframe
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "Place [character] naturally in [background] scene, [style] style" \
-  --reference {output_dir}/scene-01/layers/background.png \
-  --output {output_dir}/scene-01/keyframe-start.png
+# If you have a reference photo/artwork showing the desired pose
+python {baseDir}/scripts/keyframe_generator.py \
+  --prompt "[Action description]" \
+  --character {output_dir}/assets/characters/[character_name].png \
+  --pose-image [path/to/reference_photo.jpg] \
+  --output {output_dir}/keyframes/KF-C.png
 ```
-
-**End Keyframe (different pose):**
-Repeat Steps 2-3 with the end frame pose from `scene-breakdown.md`.
 
 ### Step 3.3: Landscape Scene Generation (type: landscape)
 
-**Landscape scenes generate background only:**
+**Landscape scenes use `asset_generator.py` for background only:**
 
 ```bash
-# Scene 2: Landscape - background only
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "[Background description with scene details], [style] style" \
-  --reference {output_dir}/assets/backgrounds/[background_name].png \
-  --output {output_dir}/scene-02/keyframe-start.png
-
-# Also save to layers for reference chain
-cp {output_dir}/scene-02/keyframe-start.png {output_dir}/scene-02/layers/background.png
+python {baseDir}/scripts/asset_generator.py background \
+  --name scene02_bg \
+  --description "[Background description with scene details], [style] style" \
+  --output {output_dir}/keyframes/KF-landscape.png
 ```
 
-### Step 3.4: Scene Continuity
+### Step 3.4: Key Principles
 
-**For consecutive scenes sharing backgrounds:**
+**NEVER chain keyframes as references:**
 ```bash
-# Scene 3 uses Scene 2's background as reference (chaining)
-python {baseDir}/scripts/qwen_image_comfyui.py \
-  --prompt "[Modified background description]" \
-  --reference {output_dir}/scene-02/layers/background.png \
-  --output {output_dir}/scene-03/layers/background.png
+# WRONG - causes similar keyframes
+--reference {output_dir}/keyframes/KF-A.png  # DON'T DO THIS
+
+# CORRECT - always use original character asset
+--character {output_dir}/assets/characters/[character_name].png
 ```
 
-**For character identity (NEVER chain - always use original):**
-```bash
-# ALWAYS reference original character asset, not previous keyframe
---reference {output_dir}/assets/characters/[character_name].png
-```
+**Pose skeletons control body position without identity leakage:**
+- The skeleton is just a stick figure - no character appearance
+- Different skeletons = dramatically different poses
+- Same character asset + different skeleton = same character in different pose
 
 ### Step 3.5: Keyframe Quality Checklist
 
@@ -753,23 +749,27 @@ If models are missing, the setup script will download them automatically.
 | Switching From | Switching To | Command |
 |----------------|--------------|---------|
 | Image generation | Video generation | `wan_video_comfyui.py --free-memory ...` |
-| Video generation | Image generation | `qwen_image_comfyui.py --free-memory ...` |
+| Video generation | Image generation | `asset_generator.py --free-memory ...` or `keyframe_generator.py --free-memory ...` |
 | Same model type | Same model type | No flag needed (models stay warm) |
 
 **Example workflow:**
 ```bash
-# Generate multiple images (Qwen stays warm)
-python qwen_image_comfyui.py --prompt "..." --output keyframe1.png
-python qwen_image_comfyui.py --prompt "..." --output keyframe2.png
+# Generate assets (Qwen stays warm)
+python asset_generator.py character --name hero --description "..." --output assets/hero.png
+python asset_generator.py pose --source ref.jpg --output assets/poses/action.png
+
+# Generate keyframes (Qwen still warm)
+python keyframe_generator.py --character assets/hero.png --pose assets/poses/action.png --prompt "..." --output keyframes/KF-A.png
+python keyframe_generator.py --character assets/hero.png --pose assets/poses/rest.png --prompt "..." --output keyframes/KF-B.png
 
 # Switch to video - FREE MEMORY FIRST
-python wan_video_comfyui.py --free-memory --prompt "..." --start-frame keyframe1.png --output video1.mp4
+python wan_video_comfyui.py --free-memory --prompt "..." --start-frame keyframes/KF-A.png --end-frame keyframes/KF-B.png --output video1.mp4
 
 # Generate more videos (WAN stays warm)
-python wan_video_comfyui.py --prompt "..." --start-frame keyframe2.png --output video2.mp4
+python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --output video2.mp4
 
 # Switch back to images - FREE MEMORY FIRST
-python qwen_image_comfyui.py --free-memory --prompt "..." --output keyframe3.png
+python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/new.png --prompt "..." --output keyframes/KF-C.png
 ```
 
 **Why this matters:**
@@ -783,19 +783,29 @@ python qwen_image_comfyui.py --free-memory --prompt "..." --output keyframe3.png
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `qwen_image_comfyui.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--reference`, `--pose`, `--free-memory` |
+| `asset_generator.py` | Generate reusable assets | `character`, `background`, `pose`, `style` subcommands |
+| `keyframe_generator.py` | Generate keyframes with identity+pose separation | `--prompt`, `--character`, `--pose`, `--output` |
 | `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output`, `--free-memory` |
 | `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
 
 **Remember:** Use `--free-memory` when switching between image and video generation!
 
-### Keyframe Generation Modes
+### Asset Generation
+
+| Asset Type | Command | Output |
+|------------|---------|--------|
+| **Character** | `asset_generator.py character --name X --description "..." -o path` | Neutral A-pose, white background |
+| **Background** | `asset_generator.py background --name X --description "..." -o path` | Environment, no people |
+| **Pose Skeleton** | `asset_generator.py pose --source ref.jpg -o path` | Stick figure skeleton |
+| **Style** | `asset_generator.py style --name X --description "..." -o path` | Style reference |
+
+### Keyframe Generation
 
 | Mode | Command | Description |
 |------|---------|-------------|
-| **T2I** | `qwen_image_comfyui.py ...` (no ref) | Create initial image from scratch. |
-| **Edit** | `qwen_image_comfyui.py ... --reference ...` | Edit existing image while maintaining consistency. |
-| **Pose** | `qwen_image_comfyui.py ... --reference ... --pose ...` | Generate with pose transfer (ControlNet). |
+| **Single Character** | `keyframe_generator.py --character X --pose Y --prompt "..."` | Character with pose control |
+| **Multi-Character** | `keyframe_generator.py --character A --character B --pose Y --prompt "..."` | Up to 3 characters |
+| **Pose from Image** | `keyframe_generator.py --character X --pose-image ref.jpg --prompt "..."` | Extract pose on-the-fly |
 
 ### Video Generation Modes
 
