@@ -4,13 +4,22 @@ Generate videos using WAN 2.2 with LightX2V distillation via ComfyUI.
 Supports single-frame (I2V) and dual-frame (FLF2V) generation modes.
 
 Uses native ComfyUI nodes with LightX2V distillation LoRA for fast 8-step generation.
+
+Includes automatic color correction to fix WAN's color drift issue where
+saturation increases over time during video generation.
 """
 
 import argparse
 import json
+import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
+
+import cv2
+import numpy as np
 
 from comfyui_client import (
     ComfyUIClient,
@@ -38,6 +47,132 @@ RESOLUTION_PRESETS = {
     "medium": {"width": 832, "height": 480, "length": 81},  # ~10GB VRAM
     "high": {"width": 1280, "height": 720, "length": 81},   # ~16GB+ VRAM
 }
+
+
+def match_histogram_lab(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    """
+    Match the color histogram of source image to reference image using LAB color space.
+
+    This fixes WAN's color drift issue where saturation increases over time.
+
+    Args:
+        source: Source image (BGR format from OpenCV)
+        reference: Reference image to match colors to (BGR format)
+
+    Returns:
+        Color-corrected image (BGR format)
+    """
+    # Convert to LAB color space for perceptually uniform matching
+    src_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
+    ref_lab = cv2.cvtColor(reference, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+    # Match each channel independently
+    result = np.zeros_like(src_lab)
+    for i in range(3):
+        src_mean, src_std = src_lab[:, :, i].mean(), src_lab[:, :, i].std()
+        ref_mean, ref_std = ref_lab[:, :, i].mean(), ref_lab[:, :, i].std()
+
+        # Normalize source to reference distribution
+        # Avoid division by zero
+        if src_std > 1e-6:
+            result[:, :, i] = (src_lab[:, :, i] - src_mean) * (ref_std / src_std) + ref_mean
+        else:
+            result[:, :, i] = src_lab[:, :, i]
+
+    # Clip to valid range and convert back to BGR
+    result = np.clip(result, 0, 255).astype(np.uint8)
+    return cv2.cvtColor(result, cv2.COLOR_LAB2BGR)
+
+
+def correct_video_colors(
+    video_path: str,
+    reference_image_path: str,
+    output_path: str = None,
+    fps: float = 16.0,
+) -> str:
+    """
+    Apply color correction to a video using a reference image.
+
+    Fixes WAN's color drift by matching each frame's color histogram
+    to the reference image (typically the start frame).
+
+    Args:
+        video_path: Path to input video
+        reference_image_path: Path to reference image for color matching
+        output_path: Output path (defaults to overwriting input)
+        fps: Frame rate for output video
+
+    Returns:
+        Path to corrected video
+    """
+    if output_path is None:
+        output_path = video_path
+
+    # Load reference image
+    reference = cv2.imread(reference_image_path)
+    if reference is None:
+        print_status(f"Failed to load reference image: {reference_image_path}", "error")
+        return video_path
+
+    # Open input video
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print_status(f"Failed to open video: {video_path}", "error")
+        return video_path
+
+    # Get video properties
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    original_fps = cap.get(cv2.CAP_PROP_FPS)
+    if original_fps > 0:
+        fps = original_fps
+
+    # Resize reference to match video dimensions if needed
+    if reference.shape[:2] != (height, width):
+        reference = cv2.resize(reference, (width, height), interpolation=cv2.INTER_LANCZOS4)
+
+    # Create temporary output file
+    temp_output = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+
+    # Initialize video writer with H.264 codec
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(temp_output, fourcc, fps, (width, height))
+
+    if not writer.isOpened():
+        print_status("Failed to create video writer", "error")
+        cap.release()
+        return video_path
+
+    # Process each frame
+    frame_count = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Apply color correction
+        corrected = match_histogram_lab(frame, reference)
+        writer.write(corrected)
+        frame_count += 1
+
+    # Cleanup
+    cap.release()
+    writer.release()
+
+    # Replace original with corrected version
+    # Use shutil.move instead of os.rename for cross-drive support on Windows
+    try:
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        shutil.move(temp_output, output_path)
+    except Exception as e:
+        print_status(f"Failed to save corrected video: {e}", "error")
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+        return video_path
+
+    return output_path
 
 
 def update_workflow_prompts(workflow: dict, prompt: str, negative_prompt: str = None) -> dict:
@@ -191,6 +326,7 @@ def generate_video(
     timeout: int = 600,
     workflow_path: str = None,
     free_memory: bool = False,
+    color_correct: bool = True,
 ) -> str:
     """
     Generate a video using WAN 2.2 with LightX2V distillation via ComfyUI.
@@ -364,6 +500,12 @@ def generate_video(
             video_info = videos[0]
             client.download_output(video_info, str(output))
 
+            # Apply color correction to fix WAN's color drift
+            if color_correct and start_frame:
+                print_status("Applying color correction...", "progress")
+                correct_video_colors(str(output), start_frame)
+                print_status("Color correction applied", "success")
+
             total_time = time.time() - start_time
             print_status(f"Video saved to: {output_path} ({format_duration(total_time)})", "success")
             return str(output)
@@ -476,6 +618,11 @@ def main():
         action="store_true",
         help="Free GPU memory before generation (useful when switching from Qwen image)"
     )
+    parser.add_argument(
+        "--no-color-correct",
+        action="store_true",
+        help="Disable automatic color correction (fixes WAN's color drift issue)"
+    )
 
     args = parser.parse_args()
 
@@ -496,6 +643,7 @@ def main():
         timeout=args.timeout,
         workflow_path=args.workflow,
         free_memory=args.free_memory,
+        color_correct=not args.no_color_correct,
     )
 
 
