@@ -389,11 +389,20 @@ python {baseDir}/scripts/asset_generator.py background \
   --description "[detailed environment description]" \
   --output {output_dir}/assets/backgrounds/[name].png
 
-# Pose skeleton (extract from ANY reference image - photo, artwork, etc.)
-# The skeleton is a stick figure - it does NOT contain character appearance
-python {baseDir}/scripts/asset_generator.py pose \
-  --source [path/to/reference_image.jpg] \
-  --output {output_dir}/assets/poses/[pose_name]_skeleton.png
+# Pose reference + skeleton (RECOMMENDED - generates clean image for reliable extraction)
+# Step 1: Generate a clean pose reference image optimized for skeleton detection
+# Step 2: Extract skeleton from the clean reference
+python {baseDir}/scripts/asset_generator.py pose-ref \
+  --name [pose_name] \
+  --pose "[pose description - just the body position, e.g., 'fighting stance fists raised']" \
+  --output {output_dir}/assets/poses/refs/[pose_name].png \
+  --extract-skeleton \
+  --skeleton-output {output_dir}/assets/poses/[pose_name]_skeleton.png
+
+# Alternative: Extract skeleton from existing image (may fail on complex images)
+# python {baseDir}/scripts/asset_generator.py pose \
+#   --source [path/to/reference_image.jpg] \
+#   --output {output_dir}/assets/poses/[pose_name]_skeleton.png
 
 # Style reference (example image in target style)
 python {baseDir}/scripts/asset_generator.py style \
@@ -407,6 +416,19 @@ python {baseDir}/scripts/asset_generator.py style \
 - They are extracted from reference images using DWPose
 - They do NOT contain any character appearance - only body position
 - This allows applying any pose to any character without identity leakage
+
+**POSE REFERENCE IMAGE REQUIREMENTS (for reliable skeleton extraction):**
+When generating pose reference images, follow these rules to ensure DWPose can detect the skeleton:
+1. **SINGLE CHARACTER ONLY** - never multiple people in frame
+2. **PLAIN BACKGROUND** - solid gray/white, no scenery or architecture
+3. **FULL BODY VISIBLE** - all limbs shown, not cropped
+4. **CENTERED COMPOSITION** - character in middle of frame
+5. **NO VISUAL EFFECTS** - no explosions, auras, particles, energy, fire
+6. **CLEAR SILHOUETTE** - body outline easy to distinguish
+7. **SIMPLE CLOTHING** - avoid flowing capes/robes that obscure body shape
+
+**BAD pose description:** "Epic fighting stance with energy explosion in temple arena"
+**GOOD pose description:** "fighting stance, fists raised, legs apart"
 
 ### Step 2.5.4: CHECKPOINT - Get User Approval
 
@@ -821,7 +843,8 @@ python keyframe_generator.py --free-memory --character assets/hero.png --pose as
 |------------|---------|--------|
 | **Character** | `asset_generator.py character --name X --description "..." -o path` | Neutral A-pose, white background |
 | **Background** | `asset_generator.py background --name X --description "..." -o path` | Environment, no people |
-| **Pose Skeleton** | `asset_generator.py pose --source ref.jpg -o path` | Stick figure skeleton |
+| **Pose Reference** | `asset_generator.py pose-ref --name X --pose "..." -o path --extract-skeleton` | Clean ref + skeleton (RECOMMENDED) |
+| **Pose Skeleton** | `asset_generator.py pose --source ref.jpg -o path` | Extract from existing image |
 | **Style** | `asset_generator.py style --name X --description "..." -o path` | Style reference |
 
 ### Keyframe Generation
