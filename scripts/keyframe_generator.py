@@ -5,8 +5,11 @@ Keyframe Generator for AI Video Producer.
 Generates keyframe images using character assets and pose control.
 This script properly separates:
 - Character IDENTITY from reference images (WHO)
-- Character POSE from skeleton images (WHAT position)
+- Character POSE from skeleton images (WHAT position) - REQUIRED
 - Action/context from text prompt (WHAT is happening)
+
+NOTE: Either --pose or --pose-image is REQUIRED for all keyframe generation.
+For landscape scenes without characters, use: asset_generator.py background
 
 Usage:
     # Single character with pre-extracted skeleton
@@ -41,8 +44,6 @@ from typing import List, Optional
 from core import (
     QwenImageGenerator,
     extract_pose_skeleton,
-    T2I_WORKFLOW,
-    EDIT_WORKFLOW,
     POSE_WORKFLOW,
     RESOLUTION_PRESETS,
     print_status,
@@ -187,42 +188,24 @@ def generate_keyframe(
     else:
         enhanced_prompt = prompt
 
-    # Choose workflow based on inputs
-    if skeleton_path:
-        # Use pose workflow with ControlNet
-        workflow_path = POSE_WORKFLOW
-        print_status("Mode: Pose-controlled keyframe generation")
-        print_status(f"Pose skeleton: {skeleton_path}")
+    # Use pose workflow with ControlNet (pose is always required per skill.md)
+    workflow_path = POSE_WORKFLOW
+    print_status("Mode: Pose-controlled keyframe generation")
+    print_status(f"Pose skeleton: {skeleton_path}")
 
-        result = generator.generate(
-            prompt=enhanced_prompt,
-            output_path=output_path,
-            workflow_path=workflow_path,
-            reference_image=ref1,
-            reference_image2=ref2,
-            reference_image3=ref3,
-            pose_image=skeleton_path,
-            control_strength=control_strength,
-            seed=seed,
-            style_config=style_config,
-            free_memory=False,  # Already handled above
-        )
-    else:
-        # Use edit workflow with just character reference
-        workflow_path = EDIT_WORKFLOW
-        print_status("Mode: Reference-guided keyframe generation (no pose control)")
-
-        result = generator.generate(
-            prompt=enhanced_prompt,
-            output_path=output_path,
-            workflow_path=workflow_path,
-            reference_image=ref1,
-            reference_image2=ref2,
-            reference_image3=ref3,
-            seed=seed,
-            style_config=style_config,
-            free_memory=False,
-        )
+    result = generator.generate(
+        prompt=enhanced_prompt,
+        output_path=output_path,
+        workflow_path=workflow_path,
+        reference_image=ref1,
+        reference_image2=ref2,
+        reference_image3=ref3,
+        pose_image=skeleton_path,
+        control_strength=control_strength,
+        seed=seed,
+        style_config=style_config,
+        free_memory=False,  # Already handled above
+    )
 
     # Cleanup temp skeleton if created
     if temp_skeleton:
@@ -283,8 +266,8 @@ Examples:
         help="Path to character identity asset (WHO). Can specify up to 3."
     )
 
-    # Pose options (mutually exclusive preference)
-    pose_group = parser.add_argument_group("Pose Control")
+    # Pose options (at least one REQUIRED)
+    pose_group = parser.add_argument_group("Pose Control (one REQUIRED)")
     pose_group.add_argument(
         "--pose",
         dest="pose_skeleton",
@@ -334,7 +317,12 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate pose arguments
+    # Validate pose arguments - at least one is REQUIRED per skill.md
+    if not args.pose_skeleton and not args.pose_image:
+        print_status("Either --pose or --pose-image is required for keyframe generation", "error")
+        print_status("For landscape scenes without characters, use: asset_generator.py background", "error")
+        sys.exit(1)
+
     if args.pose_skeleton and args.pose_image:
         print_status("Specify either --pose (skeleton) or --pose-image, not both", "warning")
         print_status("Using --pose (pre-extracted skeleton)")

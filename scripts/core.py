@@ -59,7 +59,6 @@ DEFAULT_NEGATIVE = "bad quality, worst quality, blurry, distorted, deformed, ugl
 
 # Workflow paths
 T2I_WORKFLOW = WORKFLOW_DIR / "qwen_t2i.json"
-EDIT_WORKFLOW = WORKFLOW_DIR / "qwen_edit.json"
 POSE_WORKFLOW = WORKFLOW_DIR / "qwen_pose.json"
 DWPOSE_WORKFLOW = WORKFLOW_DIR / "dwpose_extract.json"
 MULTIANGLE_WORKFLOW = WORKFLOW_DIR / "qwen_multiangle.json"
