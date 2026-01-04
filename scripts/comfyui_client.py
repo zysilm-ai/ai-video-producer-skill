@@ -294,6 +294,47 @@ class ComfyUIClient:
         response.raise_for_status()
         return response.json()
 
+    def free_memory(self, unload_models: bool = True, free_memory: bool = True) -> dict:
+        """
+        Free GPU memory by unloading models.
+
+        Useful when switching between different model types (e.g., Qwen ↔ WAN)
+        to avoid VRAM issues on constrained GPUs.
+
+        Args:
+            unload_models: Whether to unload all cached models
+            free_memory: Whether to free cached memory
+
+        Returns:
+            Response from the server
+        """
+        try:
+            response = requests.post(
+                f"{self.base_url}/free",
+                json={"unload_models": unload_models, "free_memory": free_memory},
+                timeout=30,
+            )
+            response.raise_for_status()
+            return response.json() if response.text else {}
+        except Exception as e:
+            # Non-critical - just log and continue
+            print_status(f"Warning: Could not free memory: {e}", "!")
+            return {}
+
+    def get_system_stats(self) -> dict:
+        """
+        Get system statistics including VRAM usage.
+
+        Returns:
+            Dict with device info, VRAM usage, etc.
+        """
+        response = requests.get(
+            f"{self.base_url}/system_stats",
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def is_prompt_in_queue(self, prompt_id: str) -> bool:
         """
         Check if a prompt is still in the queue (running or pending).

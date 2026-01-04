@@ -235,6 +235,7 @@ def generate_image(
     use_lightning: bool = True,
     timeout: int = 300,
     workflow_path: Optional[str] = None,
+    free_memory: bool = False,
 ) -> str:
     """
     Generate a keyframe image using Qwen Image Edit 2511 via ComfyUI.
@@ -268,6 +269,11 @@ def generate_image(
         print_status("ComfyUI server not available!", "error")
         print_status("Please start ComfyUI: python scripts/setup_comfyui.py --start", "error")
         sys.exit(1)
+
+    # Free memory if requested (useful when switching from WAN to Qwen)
+    if free_memory:
+        print_status("Freeing GPU memory before generation...", "*")
+        client.free_memory()
 
     # Apply resolution preset if specified
     if resolution_preset and resolution_preset in RESOLUTION_PRESETS:
@@ -526,6 +532,11 @@ def main():
         default=300,
         help="Maximum time to wait in seconds (default: 300 = 5 min)"
     )
+    parser.add_argument(
+        "--free-memory",
+        action="store_true",
+        help="Free GPU memory before generation (useful when switching from WAN video)"
+    )
 
     args = parser.parse_args()
 
@@ -547,6 +558,7 @@ def main():
         use_lightning=args.lightning,
         timeout=args.timeout,
         workflow_path=args.workflow,
+        free_memory=args.free_memory,
     )
 
 

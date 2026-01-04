@@ -190,6 +190,7 @@ def generate_video(
     lora_strength: float = 1.25,
     timeout: int = 600,
     workflow_path: str = None,
+    free_memory: bool = False,
 ) -> str:
     """
     Generate a video using WAN 2.2 with LightX2V distillation via ComfyUI.
@@ -221,6 +222,11 @@ def generate_video(
         print_status("ComfyUI server not available!", "error")
         print_status("Please start ComfyUI: python scripts/setup_comfyui.py --start", "error")
         sys.exit(1)
+
+    # Free memory if requested (useful when switching from Qwen to WAN)
+    if free_memory:
+        print_status("Freeing GPU memory before generation...", "*")
+        client.free_memory()
 
     # Apply resolution preset if specified
     if resolution_preset and resolution_preset in RESOLUTION_PRESETS:
@@ -465,6 +471,11 @@ def main():
         default=600,
         help="Maximum time to wait in seconds (default: 600 = 10 min)"
     )
+    parser.add_argument(
+        "--free-memory",
+        action="store_true",
+        help="Free GPU memory before generation (useful when switching from Qwen image)"
+    )
 
     args = parser.parse_args()
 
@@ -484,6 +495,7 @@ def main():
         lora_strength=args.lora_strength,
         timeout=args.timeout,
         workflow_path=args.workflow,
+        free_memory=args.free_memory,
     )
 
 

@@ -581,17 +581,28 @@ Before proceeding to video, verify EACH keyframe:
 
 ### Step 4.1: Generate Video Per Scene
 
+**IMPORTANT:** Use `--free-memory` on the FIRST video generation after keyframe generation to clear Qwen models from VRAM.
+
 **Single-frame mode (Image-to-Video):**
 ```bash
+# First video after images - use --free-memory
 python {baseDir}/scripts/wan_video_comfyui.py \
+  --free-memory \
   --prompt "[Motion description from scene-breakdown.md]" \
   --start-frame {output_dir}/scene-01/keyframe-start.png \
   --output {output_dir}/scene-01/video.mp4
+
+# Subsequent videos - no --free-memory needed (WAN stays warm)
+python {baseDir}/scripts/wan_video_comfyui.py \
+  --prompt "[Motion description]" \
+  --start-frame {output_dir}/scene-02/keyframe-start.png \
+  --output {output_dir}/scene-02/video.mp4
 ```
 
 **Dual-frame mode (First-Last-Frame):**
 ```bash
 python {baseDir}/scripts/wan_video_comfyui.py \
+  --free-memory \
   --prompt "[Motion description from scene-breakdown.md]" \
   --start-frame {output_dir}/scene-01/keyframe-start.png \
   --end-frame {output_dir}/scene-01/keyframe-end.png \
@@ -705,14 +716,16 @@ At the START of the workflow, create this todo list:
 9. Get user approval on assets
 10. Generate ALL unique keyframes (KF-A, KF-B, KF-C, etc.)
 11. Get user approval on keyframes
-12. Generate Scene 1 video (using KF-A → KF-B)
-13. Generate Scene 2 video (using KF-B → KF-C, KF-B is shared)
+12. Generate Scene 1 video (use --free-memory for first video!)
+13. Generate Scene 2 video (no --free-memory, WAN stays warm)
 14. [Continue for additional scenes]
 15. Provide final summary to user
 ```
 
-**Key difference:** Generate ALL unique keyframes first (step 10), then generate videos (steps 12+).
-Shared keyframes are generated once and reused across scene boundaries.
+**Key differences:**
+- Generate ALL unique keyframes first (step 10), then generate videos (steps 12+)
+- Shared keyframes are generated once and reused across scene boundaries
+- Use `--free-memory` on FIRST video (step 12) to clear Qwen models from VRAM
 
 ### Auto-Setup Check (Step 1)
 
@@ -731,15 +744,50 @@ python {baseDir}/scripts/setup_comfyui.py --start
 
 If models are missing, the setup script will download them automatically.
 
+### VRAM Management (IMPORTANT for 10GB GPUs)
+
+**The Qwen image model and WAN video model cannot both fit in 10GB VRAM simultaneously.**
+
+**RULE: Use `--free-memory` when switching between model types:**
+
+| Switching From | Switching To | Command |
+|----------------|--------------|---------|
+| Image generation | Video generation | `wan_video_comfyui.py --free-memory ...` |
+| Video generation | Image generation | `qwen_image_comfyui.py --free-memory ...` |
+| Same model type | Same model type | No flag needed (models stay warm) |
+
+**Example workflow:**
+```bash
+# Generate multiple images (Qwen stays warm)
+python qwen_image_comfyui.py --prompt "..." --output keyframe1.png
+python qwen_image_comfyui.py --prompt "..." --output keyframe2.png
+
+# Switch to video - FREE MEMORY FIRST
+python wan_video_comfyui.py --free-memory --prompt "..." --start-frame keyframe1.png --output video1.mp4
+
+# Generate more videos (WAN stays warm)
+python wan_video_comfyui.py --prompt "..." --start-frame keyframe2.png --output video2.mp4
+
+# Switch back to images - FREE MEMORY FIRST
+python qwen_image_comfyui.py --free-memory --prompt "..." --output keyframe3.png
+```
+
+**Why this matters:**
+- Qwen Image Edit uses ~6-8GB VRAM when warm
+- WAN Video uses ~6-8GB VRAM when warm
+- Without `--free-memory`, switching will cause VRAM overflow and hang
+
 ---
 
 ## Quick Reference
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `qwen_image_comfyui.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--reference`, `--pose`, `--control-strength` |
-| `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
+| `qwen_image_comfyui.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--reference`, `--pose`, `--free-memory` |
+| `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output`, `--free-memory` |
 | `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
+
+**Remember:** Use `--free-memory` when switching between image and video generation!
 
 ### Keyframe Generation Modes
 
