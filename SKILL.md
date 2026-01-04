@@ -1,7 +1,7 @@
 ---
 name: ai-video-producer
 description: >
-  Complete AI video production workflow using WAN 2.2 and Qwen Image Edit 2511 models via HuggingFace diffusers.
+  Complete AI video production workflow using WAN 2.1 and Qwen Image Edit 2511 models via ComfyUI.
   Creates any video type: promotional, educational, narrative, social media,
   animations, game trailers, music videos, product demos, and more. Use when
   users want to create videos with AI, need help with video storyboarding,
@@ -19,39 +19,43 @@ Create professional AI-generated videos through a structured, iterative workflow
 
 ## Prerequisites & Auto-Setup
 
-**This skill requires WAN 2.2 and Qwen Image Edit 2511 models via HuggingFace diffusers. The setup script handles everything automatically.**
+**This skill requires WAN 2.1 and Qwen Image Edit 2511 models via ComfyUI with GGUF quantization. The setup script handles everything automatically.**
 
 ### First-Time Setup (Automatic)
 
-Run the setup script to download required models:
+Run the setup script to install ComfyUI and download models:
 
 ```bash
-# Check current setup status
-python {baseDir}/scripts/setup_diffusers.py --check
+# Full setup (installs ComfyUI + downloads models ~40GB)
+python {baseDir}/scripts/setup_comfyui.py
 
-# Download required models (~50GB)
-python {baseDir}/scripts/setup_diffusers.py --download
+# Or check current setup status
+python {baseDir}/scripts/setup_comfyui.py --check
 
-# Download all models including optional ControlNet (~55GB)
-python {baseDir}/scripts/setup_diffusers.py --download-all
+# Download models only (if ComfyUI already installed)
+python {baseDir}/scripts/setup_comfyui.py --models
 ```
 
 The setup script will:
-1. Verify PyTorch with CUDA support is installed
-2. Verify diffusers, transformers, and accelerate are installed
-3. Download WAN 2.2 I2V model from HuggingFace
-4. Download Qwen Image Edit 2511 model
-5. Download LightX2V distillation LoRA for fast generation
-6. Optionally download ControlNet Union for pose-guided generation
+1. Clone ComfyUI into `{baseDir}/comfyui/`
+2. Install custom nodes (GGUF, VideoHelperSuite, Manager)
+3. Download WAN 2.1 I2V GGUF model (~11GB)
+4. Download Qwen Image Edit 2511 GGUF model (~13GB)
+5. Download text encoders, VAEs, and distillation LoRAs (~14GB)
 
 ### Before Each Session
 
-**No server required!** Unlike ComfyUI-based workflows, diffusers runs directly in Python:
-- Models are loaded on first use and cached
-- Memory optimization is automatic based on VRAM
-- No background processes to manage
+**Start the ComfyUI server** before generating:
 
-Just start your video project conversation.
+```bash
+# Start ComfyUI server (keep running in background)
+python {baseDir}/scripts/setup_comfyui.py --start
+
+# Or manually:
+cd {baseDir}/comfyui && python main.py --listen 0.0.0.0 --port 8188
+```
+
+The server must be running at `http://127.0.0.1:8188` for generation scripts to work.
 
 ### System Requirements
 
@@ -62,7 +66,7 @@ Just start your video project conversation.
 | Storage | 40GB free | 60GB+ |
 | OS | Windows/Linux/macOS | Ubuntu 22.04+ |
 
-**See `SETUP.md` for detailed manual installation instructions.**
+**See `README.md` for detailed setup instructions.**
 
 ## MANDATORY WORKFLOW REQUIREMENTS
 
@@ -373,22 +377,22 @@ mkdir -p {output_dir}/assets/objects
 **Generate each asset using T2I mode:**
 ```bash
 # Character identity (use detailed description)
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "Portrait of [character description], neutral pose, clean background" \
   --output {output_dir}/assets/characters/[name].png
 
 # Background (use detailed environment description)
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "[Background description], no people, establishing shot" \
   --output {output_dir}/assets/backgrounds/[name].png
 
 # Pose reference (simple figure showing pose)
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "Simple figure demonstrating [pose description], minimal background" \
   --output {output_dir}/assets/poses/[name].png
 
 # Style reference (example image in target style)
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "Example scene in [style description] style, demonstration of artistic style" \
   --output {output_dir}/assets/styles/[name].png
 ```
@@ -476,9 +480,8 @@ Output: keyframe-start.png
 **Step 1 - Generate Background Layer:**
 ```bash
 # Use background asset OR chain from previous scene
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "[Background description], [style] style, no people, establishing shot" \
-  --style-ref {output_dir}/style.json \
   --reference {output_dir}/assets/backgrounds/[background_name].png \
   --output {output_dir}/scene-01/layers/background.png
 ```
@@ -486,9 +489,8 @@ python {baseDir}/scripts/qwen_image.py \
 **Step 2 - Generate Character Layer (with pose transfer):**
 ```bash
 # Character identity + pose reference
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "[Character] in [pose description], [expression], transparent background" \
-  --style-ref {output_dir}/style.json \
   --reference {output_dir}/assets/characters/[character_name].png \
   --pose {output_dir}/assets/poses/[pose_name].png \
   --control-strength 0.8 \
@@ -498,10 +500,9 @@ python {baseDir}/scripts/qwen_image.py \
 **Step 3 - Composite Layers:**
 ```bash
 # Combine background + character into final keyframe
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "Place [character] naturally in [background] scene, [style] style" \
   --reference {output_dir}/scene-01/layers/background.png \
-  --reference {output_dir}/scene-01/layers/character.png \
   --output {output_dir}/scene-01/keyframe-start.png
 ```
 
@@ -514,9 +515,8 @@ Repeat Steps 2-3 with the end frame pose from `scene-breakdown.md`.
 
 ```bash
 # Scene 2: Landscape - background only
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "[Background description with scene details], [style] style" \
-  --style-ref {output_dir}/style.json \
   --reference {output_dir}/assets/backgrounds/[background_name].png \
   --output {output_dir}/scene-02/keyframe-start.png
 
@@ -529,7 +529,7 @@ cp {output_dir}/scene-02/keyframe-start.png {output_dir}/scene-02/layers/backgro
 **For consecutive scenes sharing backgrounds:**
 ```bash
 # Scene 3 uses Scene 2's background as reference (chaining)
-python {baseDir}/scripts/qwen_image.py \
+python {baseDir}/scripts/qwen_image_comfyui.py \
   --prompt "[Modified background description]" \
   --reference {output_dir}/scene-02/layers/background.png \
   --output {output_dir}/scene-03/layers/background.png
@@ -583,20 +583,18 @@ Before proceeding to video, verify EACH keyframe:
 
 **Single-frame mode (Image-to-Video):**
 ```bash
-python {baseDir}/scripts/wan_video.py \
+python {baseDir}/scripts/wan_video_comfyui.py \
   --prompt "[Motion description from scene-breakdown.md]" \
   --start-frame {output_dir}/scene-01/keyframe-start.png \
-  --style-ref {output_dir}/style.json \
   --output {output_dir}/scene-01/video.mp4
 ```
 
 **Dual-frame mode (First-Last-Frame):**
 ```bash
-python {baseDir}/scripts/wan_video.py \
+python {baseDir}/scripts/wan_video_comfyui.py \
   --prompt "[Motion description from scene-breakdown.md]" \
   --start-frame {output_dir}/scene-01/keyframe-start.png \
   --end-frame {output_dir}/scene-01/keyframe-end.png \
-  --style-ref {output_dir}/style.json \
   --output {output_dir}/scene-01/video.mp4
 ```
 
@@ -718,17 +716,17 @@ Shared keyframes are generated once and reused across scene boundaries.
 
 ### Auto-Setup Check (Step 1)
 
-Before starting video generation, verify the diffusers setup:
+Before starting video generation, verify ComfyUI is running:
 
 ```bash
 # Check setup status
-python {baseDir}/scripts/setup_diffusers.py --check
+python {baseDir}/scripts/setup_comfyui.py --check
 
 # If models missing, download them
-python {baseDir}/scripts/setup_diffusers.py --download
+python {baseDir}/scripts/setup_comfyui.py --models
 
-# Validate the complete setup
-python {baseDir}/scripts/validate_diffusers.py
+# Start ComfyUI server (keep running in background)
+python {baseDir}/scripts/setup_comfyui.py --start
 ```
 
 If models are missing, the setup script will download them automatically.
@@ -739,19 +737,17 @@ If models are missing, the setup script will download them automatically.
 
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
-| `qwen_image.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--style-ref`, `--reference`, `--pose`, `--control-strength` |
-| `wan_video.py` | Generate videos (WAN 2.2) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
-| `setup_diffusers.py` | Setup and download models | `--check`, `--download`, `--download-all` |
-| `validate_diffusers.py` | Validate installation | `--detailed`, `--json` |
+| `qwen_image_comfyui.py` | Generate keyframes (Qwen Image Edit) | `--prompt`, `--output`, `--reference`, `--pose`, `--control-strength` |
+| `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output` |
+| `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
 
 ### Keyframe Generation Modes
 
 | Mode | Command | Description |
 |------|---------|-------------|
-| **T2I** | `qwen_image.py ...` (no ref) | Create initial image from scratch. |
-| **Edit** | `qwen_image.py ... --reference ...` | Edit existing image while maintaining consistency. |
-| **Pose** | `qwen_image.py ... --reference ... --pose ...` | Generate with pose transfer (ControlNet). |
-| **Composite** | `qwen_image.py ... --reference [bg] --reference [char] ...` | Combine multiple images. |
+| **T2I** | `qwen_image_comfyui.py ...` (no ref) | Create initial image from scratch. |
+| **Edit** | `qwen_image_comfyui.py ... --reference ...` | Edit existing image while maintaining consistency. |
+| **Pose** | `qwen_image_comfyui.py ... --reference ... --pose ...` | Generate with pose transfer (ControlNet). |
 
 ### Video Generation Modes
 
@@ -767,30 +763,30 @@ If models are missing, the setup script will download them automatically.
 | Video Duration | ~5 seconds (81 frames) |
 | Frame Rate | 16 fps |
 | Resolution | Up to 832x480 (medium preset) |
-| VRAM Required | 10GB (WAN Q4_K_M + Qwen FP8) |
-| Steps | 20 (Qwen), 8 (WAN) |
+| VRAM Required | 10GB (GGUF Q4_K_M quantization) |
+| Image Steps | 4 (with Lightning LoRA) |
+| Video Steps | 8 (with LightX2V LoRA) |
 
-### Models Required (HuggingFace)
+### Models Required (ComfyUI + GGUF)
 
-**Video Generation (WAN 2.2):**
-| Model ID | Size | Purpose |
-|----------|------|---------|
-| `Wan-AI/Wan2.2-I2V-A14B-Diffusers` | ~28GB | Video generation pipeline |
-| `lightx2v/Wan2.1-I2V-14B-480P-StepDistill-CfgDistill-Lightx2v` | ~0.7GB | Fast 8-step generation LoRA |
+**Video Generation (WAN 2.1):**
+| Model | Size | Purpose |
+|-------|------|---------|
+| WAN 2.1 I2V Q4_K_M GGUF | ~11GB | Video generation |
+| LightX2V LoRA | ~0.7GB | Fast 8-step generation |
+| UMT5-XXL FP8 | ~5GB | Text encoder |
+| WAN VAE | ~0.2GB | Video decoding |
 
 **Keyframe Generation (Qwen Image Edit 2511):**
-| Model ID | Size | Purpose |
-|----------|------|---------|
-| `Qwen/Qwen-Image-Edit-2511` | ~20GB | Image generation pipeline |
+| Model | Size | Purpose |
+|-------|------|---------|
+| Qwen Image Edit Q4_K_M GGUF | ~13GB | Image generation |
+| Lightning LoRA | ~0.8GB | Fast 4-step generation |
+| Qwen VL 7B FP8 | ~8GB | Text encoder |
+| Qwen VAE | ~0.2GB | Image decoding (tiled) |
 
-**ControlNet (optional, for pose-guided generation):**
-| Model ID | Size | Purpose |
-|----------|------|---------|
-| `InstantX/Qwen-Image-ControlNet-Union` | ~3.5GB | Pose/depth/canny control |
+Models are stored in `{baseDir}/comfyui/models/` directory.
 
-Models are automatically cached in `~/.cache/huggingface/` on first download.
-
-See `SETUP.md` for installation instructions.
+See `README.md` for installation instructions.
 See `references/prompt-engineering.md` for detailed prompt writing guidance.
 See `references/troubleshooting.md` for common issues and solutions.
-See `docs/ADVANCED_KEYFRAME_PLAN.md` for advanced layer-based generation details.
