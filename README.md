@@ -68,10 +68,13 @@ This will:
 ### 2. Start ComfyUI Server
 
 ```bash
+# Automatically uses --cache-none for optimal 10GB VRAM performance
 python scripts/setup_comfyui.py --start
 ```
 
 Keep this running in the background. The server must be running for generation.
+
+**Note:** The `--cache-none` flag is automatically used to enable sequential model loading, which is critical for multi-reference keyframe generation on 10GB VRAM systems.
 
 ### 3. Generate!
 
@@ -87,8 +90,9 @@ python scripts/asset_generator.py pose \
   --source references/charge_pose.jpg \
   --output outputs/assets/charge_skeleton.png
 
-# Step 3: Generate keyframe with character + pose
+# Step 3: Generate keyframe with character + pose (--free-memory is MANDATORY)
 python scripts/keyframe_generator.py \
+  --free-memory \
   --prompt "Warrior charging forward, cape flowing, dramatic lighting" \
   --character outputs/assets/warrior.png \
   --pose outputs/assets/charge_skeleton.png \
@@ -226,8 +230,11 @@ python scripts/asset_generator.py style \
 
 Generate keyframes using character assets and pose control.
 
+**IMPORTANT:** Always use `--free-memory` for EVERY keyframe generation to prevent VRAM fragmentation.
+
 ```bash
 python scripts/keyframe_generator.py \
+  --free-memory \                        # MANDATORY - prevents VRAM fragmentation
   --prompt "Action/scene description" \
   --output path/to/keyframe.png \
   --character path/to/character.png      # Character identity (WHO)
@@ -236,7 +243,6 @@ python scripts/keyframe_generator.py \
   [--background path/to/background.png]  # Background reference
   [--control-strength 0.8]               # ControlNet strength
   [--preset low|medium|high]             # Resolution preset
-  [--free-memory]                        # Clear VRAM before generation
 ```
 
 **Key Principle:** Separate identity (--character) from pose (--pose) to generate the same character in dramatically different poses.
@@ -244,8 +250,9 @@ python scripts/keyframe_generator.py \
 **Multi-Character Generation:**
 
 ```bash
-# Two characters (up to 3 supported)
+# Two characters (up to 3 supported) - always use --free-memory
 python scripts/keyframe_generator.py \
+  --free-memory \
   --prompt "On the left: warrior attacking. On the right: ninja defending." \
   --character assets/warrior.png \
   --character assets/ninja.png \
@@ -254,6 +261,7 @@ python scripts/keyframe_generator.py \
 
 # Two characters with background reference
 python scripts/keyframe_generator.py \
+  --free-memory \
   --prompt "Warriors facing off in temple courtyard" \
   --background assets/backgrounds/temple.png \
   --character assets/warrior.png \
@@ -444,6 +452,23 @@ The tiled VAE decode should handle most VRAM issues. If problems persist:
 ### Slow Generation
 
 First run is slower due to model loading (~60s). Subsequent runs with warm models are faster (~36s for images).
+
+### Multi-Reference Keyframes Very Slow (30+ minutes)
+
+If multi-reference keyframe generation (background + 2 characters + pose) takes 30+ minutes instead of ~5 minutes:
+
+1. **Ensure `--cache-none` is enabled**: The ComfyUI server must be started with `--cache-none` flag
+   ```bash
+   # Correct - uses --cache-none automatically
+   python scripts/setup_comfyui.py --start
+
+   # Or manually:
+   python main.py --listen 0.0.0.0 --port 8188 --cache-none
+   ```
+
+2. **Why this happens**: On 10GB VRAM, the Qwen VL 7B text encoder (~8GB) and diffusion model (~12GB) cannot both fit in VRAM simultaneously. Without `--cache-none`, they compete for memory causing constant CPU↔GPU swapping.
+
+3. **What `--cache-none` does**: Allows ComfyUI to unload the text encoder after encoding is complete, freeing ~8GB VRAM for the diffusion sampling stage.
 
 See [references/troubleshooting.md](references/troubleshooting.md) for more solutions.
 

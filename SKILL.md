@@ -49,13 +49,16 @@ The setup script will:
 
 ```bash
 # Start ComfyUI server (keep running in background)
+# This automatically uses --cache-none for optimal VRAM management
 python {baseDir}/scripts/setup_comfyui.py --start
 
-# Or manually:
-cd {baseDir}/comfyui && python main.py --listen 0.0.0.0 --port 8188
+# Or manually (IMPORTANT: include --cache-none for 10GB VRAM systems):
+cd {baseDir}/comfyui && python main.py --listen 0.0.0.0 --port 8188 --cache-none
 ```
 
 The server must be running at `http://127.0.0.1:8188` for generation scripts to work.
+
+**IMPORTANT:** The `--cache-none` flag is critical for multi-reference keyframe generation on 10GB VRAM systems. It allows ComfyUI to unload the text encoder (~8GB) after encoding, freeing VRAM for the diffusion model. Without it, multi-reference workflows may take 30+ minutes instead of ~5 minutes.
 
 ### System Requirements
 
@@ -74,11 +77,32 @@ The server must be running at `http://127.0.0.1:8188` for generation scripts to 
 
 1. **ALWAYS use TodoWrite** at the start to create a task list for the entire workflow
 2. **NEVER skip phases** - complete each phase in order before proceeding
-3. **ALWAYS create required files** - philosophy.md, style.json, scene-breakdown.md, and assets.json are REQUIRED
+3. **ALWAYS create required files** - philosophy.md, style.json, scene-breakdown.md, and pipeline.json are REQUIRED
 4. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 5 seconds
 5. **ALWAYS ask user for approval** before proceeding to the next phase
-6. **NEVER generate video without scene breakdown and assets** - plan first, execute second
-7. **ALWAYS use layer-based generation** for character scenes (background → character → composite)
+6. **NEVER generate without a complete pipeline.json** - plan ALL prompts first, execute second
+7. **ALWAYS use execute_pipeline.py** for generation - deterministic execution, no ad-hoc commands
+8. **ALWAYS review generated outputs using VLM** - view images after each stage, assess quality
+
+## Pipeline-Based Architecture
+
+**This skill uses a two-phase approach:**
+
+### Phase A: Planning (LLM-Driven)
+- LLM creates philosophy.md, style.json, scene-breakdown.md
+- LLM generates ALL prompts and stores in `pipeline.json`
+- User reviews and approves the complete plan before any generation
+
+### Phase B: Execution (Programmatic)
+- `execute_pipeline.py` reads pipeline.json and executes deterministically
+- LLM reviews outputs using VLM capability after each stage
+- User approves or requests regeneration
+
+**Benefits:**
+- All prompts visible before ANY generation starts
+- Deterministic execution - no LLM deviation during generation
+- Reproducible - same pipeline.json = same commands executed
+- Traceable - status tracking in pipeline.json
 
 ## Standard Checkpoint Format (ALL PHASES)
 
@@ -91,7 +115,7 @@ The server must be running at `http://127.0.0.1:8188` for generation scripts to 
 
 3. **If user does not approve:**
    - User specifies what to change
-   - Make the requested adjustments
+   - Make the requested adjustments (update pipeline.json)
    - Show updated result
    - Ask for approval again
    - **Repeat until approved**
@@ -100,14 +124,15 @@ The server must be running at `http://127.0.0.1:8188` for generation scripts to 
 
 ## Workflow Phases (MUST COMPLETE IN ORDER)
 
-| Phase | Required Outputs | Checkpoint |
-|-------|------------------|------------|
-| 1. Production Philosophy | `philosophy.md`, `style.json` | Ask user to review before Phase 2 |
-| 2. Scene Breakdown | `scene-breakdown.md` | Ask user to approve scene plan before Phase 2.5 |
-| 2.5. Asset Generation | `assets.json`, `assets/` folder | Ask user to review assets before Phase 3 |
-| 3. Keyframe Generation | `scene-XX/keyframe-*.png` | Show user each keyframe, get approval |
-| 4. Video Synthesis | `scene-XX/video.mp4` | Show user each video segment |
-| 5. Review & Iterate | Refinements as needed | User signs off on final result |
+| Phase | LLM Actions | Required Outputs | Checkpoint |
+|-------|-------------|------------------|------------|
+| 1. Production Philosophy | Create visual identity & style | `philosophy.md`, `style.json` | User approval |
+| 2. Scene Breakdown | Plan scenes & keyframes | `scene-breakdown.md` | User approval |
+| 3. Pipeline Generation | Generate ALL prompts | `pipeline.json` | User approval |
+| 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | LLM reviews with VLM, user approval |
+| 5. Keyframe Execution | Run `execute_pipeline.py --stage keyframes` | `keyframes/*.png` | LLM reviews with VLM, user approval |
+| 6. Video Execution | Run `execute_pipeline.py --stage videos` | `scene-*/video.mp4` | User approval |
+| 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off |
 
 ---
 
@@ -442,9 +467,244 @@ If user requests changes → regenerate specific assets → ask again → repeat
 
 ---
 
-## Phase 3: Keyframe Generation
+## Phase 3: Pipeline Generation (REQUIRED)
 
-**Generate UNIQUE keyframes only. Adjacent scenes share boundary keyframes for perfect continuity.**
+**DO NOT PROCEED TO EXECUTION UNTIL `pipeline.json` EXISTS AND USER APPROVES**
+
+This phase consolidates all prompts into a single structured file that will be executed deterministically.
+
+### Step 3.1: Create pipeline.json
+
+Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create a complete pipeline.json:
+
+```json
+{
+  "version": "1.0",
+  "project_name": "project-name",
+
+  "metadata": {
+    "created_at": "ISO timestamp",
+    "philosophy_file": "philosophy.md",
+    "style_file": "style.json",
+    "scene_breakdown_file": "scene-breakdown.md"
+  },
+
+  "assets": {
+    "characters": {
+      "<character_id>": {
+        "prompt": "Detailed character description for generation...",
+        "output": "assets/characters/<character_id>.png",
+        "status": "pending"
+      }
+    },
+    "backgrounds": {
+      "<background_id>": {
+        "prompt": "Detailed background description...",
+        "output": "assets/backgrounds/<background_id>.png",
+        "status": "pending"
+      }
+    },
+    "poses": {
+      "<pose_id>": {
+        "type": "generate",
+        "prompt": "Pose description for skeleton generation",
+        "output": "assets/poses/<pose_id>_skeleton.png",
+        "status": "pending"
+      }
+    }
+  },
+
+  "keyframes": [
+    {
+      "id": "KF-A",
+      "prompt": "Scene description with character positions and actions...",
+      "background": "<background_id>",
+      "characters": ["<character_id_1>", "<character_id_2>"],
+      "pose": "<pose_id>",
+      "settings": {
+        "control_strength": 0.8,
+        "preset": "medium"
+      },
+      "output": "keyframes/KF-A.png",
+      "status": "pending"
+    }
+  ],
+
+  "videos": [
+    {
+      "id": "scene-01",
+      "prompt": "Motion description - what happens between keyframes...",
+      "start_keyframe": "KF-A",
+      "end_keyframe": "KF-B",
+      "output": "scene-01/video.mp4",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+### Step 3.2: Pipeline Prompt Writing Guidelines
+
+**For Character Prompts:**
+- Include full physical description (hair, eyes, clothing, distinguishing features)
+- Mention "anime style character sheet, A-pose, full body, white background"
+- Include multiple views: "front view, side view, back view"
+
+**For Background Prompts:**
+- Describe setting, lighting, atmosphere
+- Include "no people, establishing shot"
+- Match style from philosophy.md
+
+**For Pose Prompts:**
+- Describe body positions only, NO character appearance
+- Use simple language: "two people, left person [action], right person [action]"
+- Follow pose reference image requirements from Phase 2.5
+
+**For Keyframe Prompts:**
+- Use positional language: "On the left:", "On the right:", "In the center:"
+- Reference character appearance from assets
+- Include background context and lighting
+- Match style from philosophy.md
+
+**For Video Prompts:**
+- Describe the MOTION, not static appearance
+- What action happens between start and end keyframes
+- Include camera movement if any
+
+### Step 3.3: CHECKPOINT - Get User Approval
+
+1. Show the complete pipeline.json to user
+2. Highlight all prompts for review
+3. Use AskUserQuestion:
+   - **"Approve"** - Proceed to execution
+   - User selects **"Other"** to specify which prompts need adjustment
+
+If user requests changes → update pipeline.json → ask again → repeat until approved
+
+---
+
+## Phase 4: Asset Execution
+
+**Execute asset generation using the pipeline executor.**
+
+### Step 4.1: Run Asset Stage
+
+```bash
+python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --stage assets
+```
+
+This will:
+- Generate all characters, backgrounds, poses defined in pipeline.json
+- Automatically use `--free-memory` for each generation
+- Update status in pipeline.json as items complete
+
+### Step 4.2: Review Assets with VLM
+
+After execution completes, use the Read tool to view each generated asset:
+
+```
+1. View each character asset - verify appearance matches description
+2. View each background asset - verify setting and style
+3. View each pose skeleton - verify body positions are correct
+```
+
+### Step 4.3: CHECKPOINT - Get User Approval
+
+1. Show generated assets to user (use Read tool to display images)
+2. Report on quality and any issues noticed
+3. Use AskUserQuestion:
+   - **"Approve"** - Proceed to keyframes
+   - User selects **"Other"** to specify which assets need regeneration
+
+If regeneration needed:
+1. Update the prompt in pipeline.json
+2. Run: `python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --regenerate <asset_id>`
+3. Review again → repeat until approved
+
+---
+
+## Phase 5: Keyframe Execution
+
+**Execute keyframe generation using the pipeline executor.**
+
+### Step 5.1: Run Keyframe Stage
+
+```bash
+python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --stage keyframes
+```
+
+This will:
+- Generate all keyframes defined in pipeline.json
+- Reference assets by ID (resolved to file paths automatically)
+- Use `--free-memory` for EVERY keyframe (mandatory)
+- Update status in pipeline.json as items complete
+
+### Step 5.2: Review Keyframes with VLM
+
+After execution completes, use the Read tool to view each keyframe:
+
+```
+1. View each keyframe image
+2. Check character consistency with assets
+3. Check pose matches skeleton
+4. Check background consistency
+5. Check style matches philosophy
+```
+
+### Step 5.3: CHECKPOINT - Get User Approval
+
+1. Show generated keyframes to user (use Read tool to display images)
+2. Report on quality and consistency
+3. Use AskUserQuestion:
+   - **"Approve"** - Proceed to videos
+   - User selects **"Other"** to specify which keyframes need regeneration
+
+If regeneration needed:
+1. Update the prompt in pipeline.json
+2. Run: `python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --regenerate <KF-id>`
+3. Review again → repeat until approved
+
+---
+
+## Phase 6: Video Execution
+
+**Execute video generation using the pipeline executor.**
+
+### Step 6.1: Run Video Stage
+
+```bash
+python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --stage videos
+```
+
+This will:
+- Generate all videos defined in pipeline.json
+- Reference keyframes by ID (resolved to file paths automatically)
+- Use `--free-memory` only on first video (switching from image to video models)
+- Update status in pipeline.json as items complete
+
+### Step 6.2: CHECKPOINT - Get User Approval
+
+1. Inform user of generated video locations
+2. Use AskUserQuestion:
+   - **"Approve"** - Complete
+   - User selects **"Other"** to specify which videos need regeneration
+
+If regeneration needed:
+1. Update the prompt in pipeline.json
+2. Run: `python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --regenerate <scene-id>`
+3. Review again → repeat until approved
+
+---
+
+## Phase 7: Review & Iterate
+
+Handle any final adjustments requested by user.
+
+---
+
+## Reference: Keyframe Generation Details
+
+**The following sections provide reference information used by the pipeline executor.**
 
 ### Keyframe Generation Principle
 
@@ -506,6 +766,7 @@ mkdir -p {output_dir}/scene-02
 **Single character keyframe:**
 ```bash
 python {baseDir}/scripts/keyframe_generator.py \
+  --free-memory \
   --prompt "[Action description], [expression], [environment context]" \
   --character {output_dir}/assets/characters/[character_name].png \
   --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
@@ -517,6 +778,7 @@ python {baseDir}/scripts/keyframe_generator.py \
 # Up to 3 characters can be specified
 # Characters use image1, image2, image3 reference slots
 python {baseDir}/scripts/keyframe_generator.py \
+  --free-memory \
   --prompt "On the left: [Character A action]. On the right: [Character B action]. [Scene context]" \
   --character {output_dir}/assets/characters/[character_a].png \
   --character {output_dir}/assets/characters/[character_b].png \
@@ -529,6 +791,7 @@ python {baseDir}/scripts/keyframe_generator.py \
 # Background uses image1 slot, characters use image2/image3 slots
 # This ensures both character identity AND background consistency
 python {baseDir}/scripts/keyframe_generator.py \
+  --free-memory \
   --prompt "On the left: [Character A action]. On the right: [Character B action]. [Scene context]" \
   --background {output_dir}/assets/backgrounds/[background_name].png \
   --character {output_dir}/assets/characters/[character_a].png \
@@ -550,6 +813,7 @@ python {baseDir}/scripts/keyframe_generator.py \
 ```bash
 # If you have a reference photo/artwork showing the desired pose
 python {baseDir}/scripts/keyframe_generator.py \
+  --free-memory \
   --prompt "[Action description]" \
   --character {output_dir}/assets/characters/[character_name].png \
   --pose-image [path/to/reference_photo.jpg] \
@@ -747,27 +1011,28 @@ Adjacent scenes share boundary keyframes (e.g., KF-B is used by both Scene 1 and
 At the START of the workflow, create this todo list:
 
 ```
-1. Check ComfyUI setup and start server (automatic)
+1. Check ComfyUI setup and start server
 2. Create philosophy.md
 3. Create style.json
 4. Get user approval on production philosophy
 5. Create scene-breakdown.md with unique keyframes table
 6. Get user approval on scene breakdown
-7. Create assets.json
-8. Generate asset images (characters, backgrounds, poses, styles)
-9. Get user approval on assets
-10. Generate ALL unique keyframes (KF-A, KF-B, KF-C, etc.)
-11. Get user approval on keyframes
-12. Generate Scene 1 video (use --free-memory for first video!)
-13. Generate Scene 2 video (no --free-memory, WAN stays warm)
-14. [Continue for additional scenes]
+7. Create pipeline.json with ALL prompts (assets, keyframes, videos)
+8. Get user approval on pipeline.json
+9. Execute asset stage: python execute_pipeline.py pipeline.json --stage assets
+10. Review assets with VLM, get user approval
+11. Execute keyframe stage: python execute_pipeline.py pipeline.json --stage keyframes
+12. Review keyframes with VLM, get user approval
+13. Execute video stage: python execute_pipeline.py pipeline.json --stage videos
+14. Get user approval on videos
 15. Provide final summary to user
 ```
 
-**Key differences:**
-- Generate ALL unique keyframes first (step 10), then generate videos (steps 12+)
-- Shared keyframes are generated once and reused across scene boundaries
-- Use `--free-memory` on FIRST video (step 12) to clear Qwen models from VRAM
+**Key points:**
+- ALL prompts are written to pipeline.json BEFORE any generation starts
+- User approves the complete plan before execution
+- execute_pipeline.py handles VRAM management automatically
+- LLM reviews outputs with VLM after each stage
 
 ### Auto-Setup Check (Step 1)
 
@@ -790,38 +1055,42 @@ If models are missing, the setup script will download them automatically.
 
 **The Qwen image model and WAN video model cannot both fit in 10GB VRAM simultaneously.**
 
-**RULE: Use `--free-memory` when switching between model types:**
+**RULES:**
 
-| Switching From | Switching To | Command |
-|----------------|--------------|---------|
-| Image generation | Video generation | `wan_video_comfyui.py --free-memory ...` |
-| Video generation | Image generation | `asset_generator.py --free-memory ...` or `keyframe_generator.py --free-memory ...` |
-| Same model type | Same model type | No flag needed (models stay warm) |
+1. **ALWAYS use `--free-memory` for EVERY keyframe generation** - Memory fragmentation between generations can cause ControlNet to consume all VRAM, leaving no room for the diffusion model (resulting in 20+ minute generation times instead of ~5 minutes)
+
+2. **ALWAYS use `--free-memory` when switching between image and video generation**
+
+| Operation | Command |
+|-----------|---------|
+| Generate keyframe | `keyframe_generator.py --free-memory ...` (ALWAYS) |
+| Generate video (first) | `wan_video_comfyui.py --free-memory ...` |
+| Generate video (subsequent) | `wan_video_comfyui.py ...` (no flag needed) |
+| Switch back to images | `keyframe_generator.py --free-memory ...` |
 
 **Example workflow:**
 ```bash
-# Generate assets (Qwen stays warm)
+# Generate assets (Qwen stays warm between asset generations)
 python asset_generator.py character --name hero --description "..." --output assets/hero.png
 python asset_generator.py pose --source ref.jpg --output assets/poses/action.png
 
-# Generate keyframes (Qwen still warm)
-python keyframe_generator.py --character assets/hero.png --pose assets/poses/action.png --prompt "..." --output keyframes/KF-A.png
-python keyframe_generator.py --character assets/hero.png --pose assets/poses/rest.png --prompt "..." --output keyframes/KF-B.png
+# Generate keyframes - ALWAYS use --free-memory to prevent VRAM fragmentation
+python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/action.png --prompt "..." --output keyframes/KF-A.png
+python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/rest.png --prompt "..." --output keyframes/KF-B.png
+python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/fall.png --prompt "..." --output keyframes/KF-C.png
 
 # Switch to video - FREE MEMORY FIRST
 python wan_video_comfyui.py --free-memory --prompt "..." --start-frame keyframes/KF-A.png --end-frame keyframes/KF-B.png --output video1.mp4
 
 # Generate more videos (WAN stays warm)
-python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --output video2.mp4
-
-# Switch back to images - FREE MEMORY FIRST
-python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/new.png --prompt "..." --output keyframes/KF-C.png
+python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --end-frame keyframes/KF-C.png --output video2.mp4
 ```
 
-**Why this matters:**
-- Qwen Image Edit uses ~6-8GB VRAM when warm
-- WAN Video uses ~6-8GB VRAM when warm
-- Without `--free-memory`, switching will cause VRAM overflow and hang
+**Why `--free-memory` is mandatory for keyframes:**
+- Multi-reference keyframe generation uses: Text Encoder (~8GB) + ControlNet (~3GB) + Diffusion Model (~12GB)
+- Without clearing memory between generations, ControlNet may load first and consume all available VRAM
+- This forces the diffusion model to run from CPU offload (0 MB in VRAM), causing 20+ minute generation times
+- With `--free-memory`, each generation starts fresh with optimal memory allocation (~5 minutes)
 
 ---
 
@@ -849,12 +1118,14 @@ python keyframe_generator.py --free-memory --character assets/hero.png --pose as
 
 ### Keyframe Generation
 
+**IMPORTANT:** Always use `--free-memory` for every keyframe generation to prevent VRAM fragmentation.
+
 | Mode | Command | Description |
 |------|---------|-------------|
-| **Single Character** | `keyframe_generator.py --character X --pose Y --prompt "..."` | Character with pose control |
-| **Multi-Character** | `keyframe_generator.py --character A --character B --pose Y --prompt "..."` | Up to 3 characters |
-| **Pose from Image** | `keyframe_generator.py --character X --pose-image ref.jpg --prompt "..."` | Extract pose on-the-fly |
-| **With Background** | `keyframe_generator.py --background B --character X --character Y ...` | Background + 2 chars |
+| **Single Character** | `keyframe_generator.py --free-memory --character X --pose Y --prompt "..."` | Character with pose control |
+| **Multi-Character** | `keyframe_generator.py --free-memory --character A --character B --pose Y --prompt "..."` | Up to 3 characters |
+| **Pose from Image** | `keyframe_generator.py --free-memory --character X --pose-image ref.jpg --prompt "..."` | Extract pose on-the-fly |
+| **With Background** | `keyframe_generator.py --free-memory --background B --character X --character Y ...` | Background + 2 chars |
 
 ### Camera Angle Transformation
 
