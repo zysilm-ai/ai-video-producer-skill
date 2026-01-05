@@ -39,6 +39,8 @@ from utils import (
 # Default workflow paths
 WORKFLOW_DIR = Path(__file__).parent / "workflows"
 I2V_WORKFLOW = WORKFLOW_DIR / "wan_i2v.json"
+I2V_WORKFLOW_Q6K = WORKFLOW_DIR / "wan_i2v_q6k.json"  # Q6K without LoRA (deprecated)
+I2V_WORKFLOW_MOE = WORKFLOW_DIR / "wan_i2v_moe.json"  # WAN 2.2 MoE (HighNoise + LowNoise)
 FLF2V_WORKFLOW = WORKFLOW_DIR / "wan_flf2v.json"
 
 # Resolution presets for different VRAM levels
@@ -327,6 +329,8 @@ def generate_video(
     workflow_path: str = None,
     free_memory: bool = False,
     color_correct: bool = True,
+    use_q6k: bool = False,
+    use_moe: bool = False,
 ) -> str:
     """
     Generate a video using WAN 2.2 with LightX2V distillation via ComfyUI.
@@ -386,14 +390,25 @@ def generate_video(
         print_status("Mode: First-Last-Frame (FLF2V) - 8-step LightX2V")
     elif start_frame:
         mode = "i2v"
-        workflow_file = I2V_WORKFLOW
-        print_status("Mode: Image-to-Video (I2V) - 8-step LightX2V")
+        if use_moe:
+            workflow_file = I2V_WORKFLOW_MOE
+            print_status("Mode: Image-to-Video (I2V) - WAN 2.2 MoE (HighNoise + LowNoise, 20 steps)")
+        elif use_q6k:
+            workflow_file = I2V_WORKFLOW_Q6K
+            print_status("Mode: Image-to-Video (I2V) - WAN 2.2 Q6_K (30 steps, no LoRA) [deprecated]")
+        else:
+            workflow_file = I2V_WORKFLOW
+            print_status("Mode: Image-to-Video (I2V) - 8-step LightX2V")
     elif end_frame:
         mode = "i2v"
         start_frame = end_frame
         end_frame = None
-        workflow_file = I2V_WORKFLOW
-        print_status("Mode: Image-to-Video (I2V) - using end frame as start")
+        if use_q6k:
+            workflow_file = I2V_WORKFLOW_Q6K
+            print_status("Mode: Image-to-Video (I2V) - WAN 2.2 Q6_K (using end frame as start)")
+        else:
+            workflow_file = I2V_WORKFLOW
+            print_status("Mode: Image-to-Video (I2V) - using end frame as start")
     else:
         print_status("Error: At least one frame (start_frame) is required", "error")
         print_status("Text-to-video without frames is not yet supported in this workflow", "error")
@@ -461,11 +476,19 @@ def generate_video(
     workflow = update_workflow_images(workflow, start_frame_name, end_frame_name)
     workflow = update_workflow_resolution(workflow, width, height, length)
     workflow = update_workflow_sampler(workflow, steps, cfg, seed)
-    workflow = update_workflow_lora(workflow, lora_strength)
+    
+    # Skip LoRA update for Q6K/MoE modes (no LoRA in workflow)
+    if not use_q6k and not use_moe:
+        workflow = update_workflow_lora(workflow, lora_strength)
 
     # Execute workflow
     print_status("Submitting video generation request...", "progress")
-    print_status(f"Settings: {length} frames, {steps} steps, CFG {cfg}, LoRA {lora_strength}")
+    if use_moe:
+        print_status(f"Settings: {length} frames, 20 steps, CFG 4.0/3.0, WAN 2.2 MoE (HighNoise + LowNoise)")
+    elif use_q6k:
+        print_status(f"Settings: {length} frames, {steps} steps, CFG {cfg}, WAN 2.2 Q6_K (no LoRA)")
+    else:
+        print_status(f"Settings: {length} frames, {steps} steps, CFG {cfg}, LoRA {lora_strength}")
     if width and height:
         print_status(f"Resolution: {width}x{height}")
 
@@ -604,6 +627,16 @@ def main():
         help="LightX2V LoRA strength (default: 1.25 for I2V)"
     )
     parser.add_argument(
+        "--q6k",
+        action="store_true",
+        help="(Deprecated) Use single Q6K model - use --moe instead"
+    )
+    parser.add_argument(
+        "--moe",
+        action="store_true",
+        help="Use WAN 2.2 MoE (HighNoise + LowNoise experts, 20 steps, best quality)"
+    )
+    parser.add_argument(
         "--workflow",
         help="Custom workflow JSON file path"
     )
@@ -644,6 +677,8 @@ def main():
         workflow_path=args.workflow,
         free_memory=args.free_memory,
         color_correct=not args.no_color_correct,
+        use_q6k=args.q6k,
+        use_moe=args.moe,
     )
 
 

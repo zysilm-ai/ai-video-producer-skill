@@ -19,6 +19,12 @@ import sys
 import urllib.request
 from pathlib import Path
 
+try:
+    from huggingface_hub import hf_hub_download
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+
 
 # Configuration - ComfyUI installs in repository folder
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -46,6 +52,7 @@ CUSTOM_NODES = {
     "ComfyUI-VideoHelperSuite": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
     "ComfyUI-Manager": "https://github.com/ltdrdata/ComfyUI-Manager.git",
     "comfyui_controlnet_aux": "https://github.com/Fannovel16/comfyui_controlnet_aux.git",
+    "ComfyUI-WanMoeKSampler": "https://github.com/stduhpf/ComfyUI-WanMoeKSampler.git",  # MoE sampler for WAN 2.2
 }
 
 # Model URLs and paths (relative to ComfyUI/models/)
@@ -112,6 +119,23 @@ MODELS = {
         "url": "https://huggingface.co/dx8152/Qwen-Edit-2509-Multiple-angles/resolve/main/%E9%95%9C%E5%A4%B4%E8%BD%AC%E6%8D%A2.safetensors",
         "size_gb": 0.8,
         "required": False,  # Optional for angle transforms
+    },
+    # === WAN 2.2 Q6_K MoE MODELS (Both required for proper MoE architecture) ===
+    # WAN 2.2 I2V Q6_K HighNoise (handles early denoising steps)
+    "diffusion_models/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf": {
+        "hf_repo": "QuantStack/Wan2.2-I2V-A14B-GGUF",
+        "hf_file": "HighNoise/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf",
+        "size_gb": 12.0,
+        "required": False,  # Optional - use --q6k to download
+        "q6k": True,  # Marker for Q6K model
+    },
+    # WAN 2.2 I2V Q6_K LowNoise (handles later refinement steps)
+    "diffusion_models/Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf": {
+        "hf_repo": "QuantStack/Wan2.2-I2V-A14B-GGUF",
+        "hf_file": "LowNoise/Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf",
+        "size_gb": 12.0,
+        "required": False,  # Optional - use --q6k to download
+        "q6k": True,  # Marker for Q6K model
     },
 }
 
@@ -292,21 +316,73 @@ def download_file(url: str, target: Path, desc: str = None):
         return False
 
 
-def download_models(comfyui_dir: Path):
+def download_from_hf(repo_id: str, filename: str, target: Path, desc: str = None):
+    """Download a file from HuggingFace Hub."""
+    if not HF_AVAILABLE:
+        print_status("huggingface_hub not installed. Run: pip install huggingface_hub", "error")
+        return False
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if target.exists():
+        print_status(f"Already exists: {target.name}", "success")
+        return True
+
+    desc = desc or target.name
+    print_status(f"Downloading {desc} from HuggingFace...", "progress")
+
+    try:
+        # Download to a temp location then move to target
+        downloaded = hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            local_dir=target.parent,
+        )
+        # Move from subfolder to target location
+        downloaded_path = Path(downloaded)
+        if downloaded_path != target and downloaded_path.exists():
+            import shutil
+            shutil.move(str(downloaded_path), str(target))
+            # Clean up empty subfolder
+            subfolder = target.parent / filename.split('/')[0]
+            if subfolder.exists() and subfolder.is_dir():
+                try:
+                    subfolder.rmdir()
+                except OSError:
+                    pass
+        print_status(f"Downloaded: {target.name}", "success")
+        return True
+    except Exception as e:
+        print_status(f"Failed to download {desc}: {e}", "error")
+        return False
+
+
+def download_models(comfyui_dir: Path, include_q6k: bool = False):
     """Download required models."""
     print_status("Downloading models (this may take a while)...", "progress")
 
     models_dir = comfyui_dir / "models"
 
     # Calculate total size
-    total_size = sum(m["size_gb"] for m in MODELS.values() if m["required"])
+    total_size = sum(m["size_gb"] for m in MODELS.values() if m.get("required"))
+    if include_q6k:
+        total_size += sum(m["size_gb"] for m in MODELS.values() if m.get("q6k"))
     print_status(f"Total download size: ~{total_size:.1f}GB", "info")
 
     for path, info in MODELS.items():
-        if info["required"]:
+        should_download = info.get("required", False)
+        if include_q6k and info.get("q6k", False):
+            should_download = True
+        
+        if should_download:
             target = models_dir / path
-            if not download_file(info["url"], target, path):
-                return False
+            # Use HuggingFace Hub for hf_repo models, URL for others
+            if "hf_repo" in info:
+                if not download_from_hf(info["hf_repo"], info["hf_file"], target, path):
+                    return False
+            else:
+                if not download_file(info["url"], target, path):
+                    return False
 
     print_status("Models downloaded", "success")
     return True
@@ -421,6 +497,11 @@ def main():
         help="Download models only"
     )
     parser.add_argument(
+        "--q6k",
+        action="store_true",
+        help="Include WAN 2.2 Q6_K model (12GB, higher quality, no LoRA required)"
+    )
+    parser.add_argument(
         "--dir",
         type=Path,
         default=COMFYUI_DIR,
@@ -457,7 +538,7 @@ def main():
         if not comfyui_dir.exists():
             print_status("ComfyUI not installed. Run full setup first.", "error")
             return 1
-        download_models(comfyui_dir)
+        download_models(comfyui_dir, include_q6k=args.q6k)
         return 0
 
     # Full setup
@@ -480,7 +561,7 @@ def main():
     setup_custom_nodes(comfyui_dir)
 
     # Download models
-    if not download_models(comfyui_dir):
+    if not download_models(comfyui_dir, include_q6k=args.q6k):
         print_status("Model download failed. Run again with --models", "error")
         return 1
 
