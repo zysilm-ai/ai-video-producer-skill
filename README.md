@@ -1,6 +1,6 @@
 # AI Video Producer Skill
 
-A Claude Code skill for complete AI video production workflows using **WAN 2.2** video generation and **Qwen Image Edit 2511** keyframe generation via **ComfyUI**. Runs entirely locally on consumer GPUs (RTX 3080+ with 10GB+ VRAM).
+A Claude Code skill for complete AI video production workflows using **WAN 2.2** video generation and **Qwen Image Edit 2511** keyframe generation via **ComfyUI**. Runs entirely locally on consumer GPUs. \
 If you want to generate with **Gemini** instead of local hosted models, please navigate to https://github.com/zysilm-ai/gemini-video-producer-skill
 
 ## Overview
