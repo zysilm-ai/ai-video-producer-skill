@@ -9,7 +9,7 @@ This skill guides you through creating professional AI-generated videos with a s
 0. **Pipeline Mode Selection** - Choose Video-First (recommended) or Keyframe-First
 1. **Production Philosophy** - Define visual style, motion language, and narrative approach
 2. **Scene Breakdown** - Decompose video into scenes with motion requirements
-3. **Asset Generation** - Create reusable character, background, and pose assets
+3. **Asset Generation** - Create reusable character and background assets
 4. **Keyframe/Video Generation** - Execute pipeline deterministically via `execute_pipeline.py`
 5. **Review & Iterate** - Refine based on feedback
 
@@ -20,7 +20,7 @@ The philosophy-first approach ensures visual coherence across all scenes, result
 | Mode | Description | Best For |
 |------|-------------|----------|
 | **Video-First** (Recommended) | Generate first keyframe only, then videos sequentially. Last frame of each video becomes next scene's start. | Visual continuity between scenes |
-| **Keyframe-First** | Generate all keyframes independently, then videos between them. | Precise control over end poses |
+| **Keyframe-First** | Generate all keyframes independently, then videos between them. | Precise control over end frames |
 
 ## Key Features
 
@@ -92,20 +92,14 @@ python scripts/asset_generator.py character \
   --description "A warrior in dramatic lighting, anime style, red armor" \
   --output outputs/assets/warrior.png
 
-# Step 2: Generate pose skeleton from reference image
-python scripts/asset_generator.py pose \
-  --source references/charge_pose.jpg \
-  --output outputs/assets/charge_skeleton.png
-
-# Step 3: Generate keyframe with character + pose (--free-memory is MANDATORY)
+# Step 2: Generate keyframe with character (--free-memory is MANDATORY)
 python scripts/keyframe_generator.py \
   --free-memory \
   --prompt "Warrior charging forward, cape flowing, dramatic lighting" \
   --character outputs/assets/warrior.png \
-  --pose outputs/assets/charge_skeleton.png \
   --output outputs/keyframes/KF-A.png
 
-# Step 4: Generate a video from the keyframe
+# Step 3: Generate a video from the keyframe
 python scripts/wan_video_comfyui.py \
   --free-memory \
   --prompt "The warrior charges forward, cape flowing" \
@@ -258,19 +252,6 @@ python scripts/asset_generator.py background \
   --description "[environment description]" \
   --output path/to/background.png
 
-# Pose reference + skeleton (RECOMMENDED - generates clean image for reliable extraction)
-python scripts/asset_generator.py pose-ref \
-  --name [pose_name] \
-  --pose "[pose description, e.g., 'fighting stance, fists raised']" \
-  --output path/to/pose_ref.png \
-  --extract-skeleton \
-  --skeleton-output path/to/pose_skeleton.png
-
-# Pose skeleton from existing image (may fail on complex images)
-python scripts/asset_generator.py pose \
-  --source path/to/reference_image.jpg \
-  --output path/to/pose_skeleton.png
-
 # Style reference
 python scripts/asset_generator.py style \
   --name [style_name] \
@@ -280,7 +261,7 @@ python scripts/asset_generator.py style \
 
 ### keyframe_generator.py
 
-Generate keyframes using character assets and pose control.
+Generate keyframes using character reference images.
 
 **IMPORTANT:** Always use `--free-memory` for EVERY keyframe generation to prevent VRAM fragmentation.
 
@@ -290,14 +271,9 @@ python scripts/keyframe_generator.py \
   --prompt "Action/scene description" \
   --output path/to/keyframe.png \
   --character path/to/character.png      # Character identity (WHO)
-  --pose path/to/pose_skeleton.png       # Pose skeleton (WHAT position)
-  [--pose-image path/to/ref.jpg]         # Extract pose on-the-fly
   [--background path/to/background.png]  # Background reference
-  [--control-strength 0.8]               # ControlNet strength
   [--preset low|medium|high]             # Resolution preset
 ```
-
-**Key Principle:** Separate identity (--character) from pose (--pose) to generate the same character in dramatically different poses.
 
 **Multi-Character Generation:**
 
@@ -308,7 +284,6 @@ python scripts/keyframe_generator.py \
   --prompt "On the left: warrior attacking. On the right: ninja defending." \
   --character assets/warrior.png \
   --character assets/ninja.png \
-  --pose assets/poses/combat_skeleton.png \
   --output keyframes/KF-battle.png
 
 # Two characters with background reference
@@ -318,7 +293,6 @@ python scripts/keyframe_generator.py \
   --background assets/backgrounds/temple.png \
   --character assets/warrior.png \
   --character assets/ninja.png \
-  --pose assets/poses/standoff_skeleton.png \
   --output keyframes/KF-standoff.png
 ```
 
@@ -431,8 +405,8 @@ gemini-video-producer-skill/
 ├── README.md                   # This file
 ├── scripts/
 │   ├── execute_pipeline.py     # Pipeline executor
-│   ├── asset_generator.py      # Generate character/background/pose assets
-│   ├── keyframe_generator.py   # Generate keyframes with pose control
+│   ├── asset_generator.py      # Generate character/background/style assets
+│   ├── keyframe_generator.py   # Generate keyframes with character references
 │   ├── angle_transformer.py    # Transform keyframe camera angles
 │   ├── wan_video_comfyui.py    # Video generation (WAN 2.1/2.2)
 │   ├── setup_comfyui.py        # ComfyUI setup and server management
@@ -441,7 +415,6 @@ gemini-video-producer-skill/
 │   ├── utils.py                # Shared utilities
 │   └── workflows/              # ComfyUI workflow JSON files
 │       ├── qwen_*.json         # Image generation workflows
-│       ├── dwpose_extract.json # Skeleton extraction
 │       ├── wan_i2v.json        # Image-to-Video (WAN 2.1)
 │       ├── wan_flf2v.json      # First-Last-Frame-to-Video
 │       ├── wan_i2v_moe.json    # WAN 2.2 MoE (20 steps)
@@ -470,7 +443,6 @@ outputs/my-project/
 ├── assets/
 │   ├── characters/           # Character identity assets
 │   ├── backgrounds/          # Environment references
-│   ├── poses/                # Skeleton files
 │   └── styles/               # Style references
 ├── keyframes/                # Generated/extracted keyframes
 │   ├── KF-A.png              # First keyframe (generated)
@@ -524,7 +496,7 @@ First run is slower due to model loading (~60s). Subsequent runs with warm model
 
 ### Multi-Reference Keyframes Very Slow (30+ minutes)
 
-If multi-reference keyframe generation (background + 2 characters + pose) takes 30+ minutes instead of ~5 minutes:
+If multi-reference keyframe generation (background + 2 characters) takes longer than expected:
 
 1. **Ensure `--cache-none` is enabled**: The ComfyUI server must be started with `--cache-none` flag
    ```bash

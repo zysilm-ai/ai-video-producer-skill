@@ -184,7 +184,7 @@ class PipelineExecutor:
             return False
 
     def execute_assets(self):
-        """Generate all assets (characters, backgrounds, poses, styles)."""
+        """Generate all assets (characters, backgrounds, styles)."""
         print("\n" + "=" * 60)
         print("STAGE: ASSETS")
         print("=" * 60)
@@ -246,59 +246,6 @@ class PipelineExecutor:
                     self._update_asset_status("backgrounds", bg_id, "generated")
                 else:
                     self._update_asset_status("backgrounds", bg_id, "failed")
-
-        # Poses
-        poses = assets.get("poses", {})
-        if poses:
-            print(f"\n--- Poses ({len(poses)} items) ---")
-            for pose_id, pose_data in poses.items():
-                if pose_data.get("status") in ["generated", "approved"]:
-                    print(f"  [{pose_data['status']}] {pose_id} - skipping")
-                    continue
-
-                output_path = self.output_dir / pose_data["output"]
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-
-                pose_type = pose_data.get("type", "generate")
-
-                if pose_type == "extract":
-                    # Extract pose from source image
-                    source_path = pose_data.get("source", "")
-                    if not source_path:
-                        print(f"  [error] {pose_id} - no source specified for extract")
-                        self._update_asset_status("poses", pose_id, "failed")
-                        continue
-
-                    cmd = [
-                        sys.executable,
-                        str(self.scripts_dir / "asset_generator.py"),
-                        "pose",
-                        "--source", str(self.output_dir / source_path),
-                        "--output", str(output_path),
-                        "--free-memory"
-                    ]
-                else:
-                    # Generate pose reference and extract skeleton
-                    ref_output = output_path.parent / "refs" / f"{pose_id}.png"
-                    ref_output.parent.mkdir(parents=True, exist_ok=True)
-
-                    cmd = [
-                        sys.executable,
-                        str(self.scripts_dir / "asset_generator.py"),
-                        "pose-ref",
-                        "--name", pose_id,
-                        "--pose", pose_data["prompt"],
-                        "--output", str(ref_output),
-                        "--extract-skeleton",
-                        "--skeleton-output", str(output_path),
-                        "--free-memory"
-                    ]
-
-                print(f"  [pending] {pose_id} - generating ({pose_type})...")
-                if self._run_command(cmd, f"pose {pose_id}"):
-                    self._update_asset_status("poses", pose_id, "generated")
-                else:
-                    self._update_asset_status("poses", pose_id, "failed")
 
         # Styles
         styles = assets.get("styles", {})
@@ -373,18 +320,8 @@ class PipelineExecutor:
                     char_path = self.output_dir / char_data["output"]
                     cmd.extend(["--character", str(char_path)])
 
-            # Add pose reference
-            if kf.get("pose"):
-                pose_id = kf["pose"]
-                pose_data = self.pipeline["assets"]["poses"].get(pose_id, {})
-                if pose_data:
-                    pose_path = self.output_dir / pose_data["output"]
-                    cmd.extend(["--pose", str(pose_path)])
-
             # Add settings
             settings = kf.get("settings", {})
-            if "control_strength" in settings:
-                cmd.extend(["--control-strength", str(settings["control_strength"])])
             if "preset" in settings:
                 cmd.extend(["--preset", settings["preset"]])
 
@@ -521,18 +458,8 @@ class PipelineExecutor:
                     char_path = self.output_dir / char_data["output"]
                     cmd.extend(["--character", str(char_path)])
 
-            # Add pose reference
-            if first_kf.get("pose"):
-                pose_id = first_kf["pose"]
-                pose_data = self.pipeline.get("assets", {}).get("poses", {}).get(pose_id, {})
-                if pose_data:
-                    pose_path = self.output_dir / pose_data["output"]
-                    cmd.extend(["--pose", str(pose_path)])
-
             # Add settings
             settings = first_kf.get("settings", {})
-            if "control_strength" in settings:
-                cmd.extend(["--control-strength", str(settings["control_strength"])])
             if "preset" in settings:
                 cmd.extend(["--preset", settings["preset"]])
 
@@ -653,7 +580,7 @@ class PipelineExecutor:
         print(f"\nRegenerating: {item_id}")
 
         # Check assets
-        for asset_type in ["characters", "backgrounds", "poses", "styles"]:
+        for asset_type in ["characters", "backgrounds", "styles"]:
             assets = self.pipeline.get("assets", {}).get(asset_type, {})
             if item_id in assets:
                 print(f"  Found in assets/{asset_type}")
@@ -722,7 +649,7 @@ class PipelineExecutor:
 
         # Assets
         print("ASSETS:")
-        for section in ["characters", "backgrounds", "poses", "styles"]:
+        for section in ["characters", "backgrounds", "styles"]:
             items = self.pipeline.get("assets", {}).get(section, {})
             if items:
                 counts = count_statuses(items)
@@ -820,12 +747,6 @@ class PipelineExecutor:
                 if char_id not in self.pipeline.get("assets", {}).get("characters", {}):
                     errors.append(f"Keyframe {kf['id']}: character '{char_id}' not found")
 
-            # Check pose reference
-            if kf.get("pose"):
-                pose_id = kf["pose"]
-                if pose_id not in self.pipeline.get("assets", {}).get("poses", {}):
-                    errors.append(f"Keyframe {kf['id']}: pose '{pose_id}' not found")
-
         # Check keyframe references in videos
         keyframe_ids = {kf["id"] for kf in self.pipeline.get("keyframes", [])}
         for video in self.pipeline.get("videos", []):
@@ -861,11 +782,6 @@ class PipelineExecutor:
             for char_id in first_kf.get("characters", []):
                 if char_id not in self.pipeline.get("assets", {}).get("characters", {}):
                     errors.append(f"first_keyframe: character '{char_id}' not found")
-
-            if first_kf.get("pose"):
-                pose_id = first_kf["pose"]
-                if pose_id not in self.pipeline.get("assets", {}).get("poses", {}):
-                    errors.append(f"first_keyframe: pose '{pose_id}' not found")
 
         # Validate scenes
         scenes = self.pipeline.get("scenes", [])

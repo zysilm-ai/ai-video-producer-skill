@@ -2,49 +2,41 @@
 """
 Keyframe Generator for AI Video Producer.
 
-Generates keyframe images using character assets and pose control.
+Generates keyframe images using character reference images.
 This script properly separates:
 - Character IDENTITY from reference images (WHO)
-- Character POSE from skeleton images (WHAT position) - REQUIRED
 - Action/context from text prompt (WHAT is happening)
 
-NOTE: Either --pose or --pose-image is REQUIRED for all keyframe generation.
-For landscape scenes without characters, use: asset_generator.py background
-
 Usage:
-    # Single character with pre-extracted skeleton
+    # Single character
     python keyframe_generator.py \\
         --prompt "Athena in fighting stance, fists raised" \\
         --character assets/characters/athena.png \\
-        --pose assets/poses/fighting_stance_skeleton.png \\
         --output keyframes/KF-A.png
-
-    # Extract skeleton on-the-fly from reference image
-    python keyframe_generator.py \\
-        --prompt "Athena collapsed on ground" \\
-        --character assets/characters/athena.png \\
-        --pose-image references/collapse_photo.jpg \\
-        --output keyframes/KF-D.png
 
     # Multi-character scene
     python keyframe_generator.py \\
         --prompt "Athena blocking, Iori attacking with flames" \\
         --character assets/characters/athena.png \\
         --character assets/characters/iori.png \\
-        --pose assets/poses/combat_skeleton.png \\
         --output keyframes/KF-B.png
+
+    # With background
+    python keyframe_generator.py \\
+        --prompt "Athena standing in ancient temple" \\
+        --character assets/characters/athena.png \\
+        --background assets/backgrounds/temple.png \\
+        --output keyframes/KF-C.png
 """
 
 import argparse
 import sys
-import tempfile
 from pathlib import Path
 from typing import List, Optional
 
 from core import (
     QwenImageGenerator,
-    extract_pose_skeleton,
-    POSE_WORKFLOW,
+    REFERENCE_WORKFLOW,
     RESOLUTION_PRESETS,
     print_status,
 )
@@ -55,32 +47,25 @@ def generate_keyframe(
     prompt: str,
     output_path: str,
     characters: List[str],
-    pose_skeleton: str = None,
-    pose_image: str = None,
     background: str = None,
     style: str = None,
-    control_strength: float = 0.8,
     resolution_preset: str = "medium",
     seed: int = 0,
     free_memory: bool = False,
 ) -> str:
     """
-    Generate a keyframe using character assets and pose control.
+    Generate a keyframe using character reference images.
 
-    This function properly integrates:
-    - Character identity from reference images
-    - Pose from skeleton (extracted via DWPose)
-    - Scene context from prompt
+    This function integrates:
+    - Character identity from reference images (WHO)
+    - Scene context from prompt (WHAT is happening)
 
     Args:
         prompt: Action/scene description (WHAT is happening)
         output_path: Path to save generated keyframe
         characters: List of character identity asset paths (1-3)
-        pose_skeleton: Path to pre-extracted pose skeleton image
-        pose_image: Path to image to extract pose from (alternative to pose_skeleton)
         background: Optional background reference image
         style: Optional path to style.json configuration
-        control_strength: ControlNet strength for pose (0.0-1.0)
         resolution_preset: Resolution preset (low, medium, high)
         seed: Random seed (0 for random)
         free_memory: Free GPU memory before generation
@@ -100,28 +85,6 @@ def generate_keyframe(
     for char_path in characters:
         if not Path(char_path).exists():
             print_status(f"Character asset not found: {char_path}", "error")
-            sys.exit(1)
-
-    # Handle pose: either use provided skeleton or extract from image
-    skeleton_path = pose_skeleton
-    temp_skeleton = None
-
-    if pose_image and not pose_skeleton:
-        if not Path(pose_image).exists():
-            print_status(f"Pose image not found: {pose_image}", "error")
-            sys.exit(1)
-
-        # Extract skeleton to temp file
-        print_status("Extracting pose skeleton from reference image...")
-        temp_skeleton = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        skeleton_path = extract_pose_skeleton(
-            image_path=pose_image,
-            output_path=temp_skeleton.name,
-        )
-
-    elif pose_skeleton:
-        if not Path(pose_skeleton).exists():
-            print_status(f"Pose skeleton not found: {pose_skeleton}", "error")
             sys.exit(1)
 
     # Validate background if provided
@@ -188,10 +151,9 @@ def generate_keyframe(
     else:
         enhanced_prompt = prompt
 
-    # Use pose workflow with ControlNet (pose is always required per skill.md)
-    workflow_path = POSE_WORKFLOW
-    print_status("Mode: Pose-controlled keyframe generation")
-    print_status(f"Pose skeleton: {skeleton_path}")
+    # Use reference workflow for keyframe generation
+    workflow_path = REFERENCE_WORKFLOW
+    print_status("Mode: Reference-based keyframe generation")
 
     result = generator.generate(
         prompt=enhanced_prompt,
@@ -200,50 +162,39 @@ def generate_keyframe(
         reference_image=ref1,
         reference_image2=ref2,
         reference_image3=ref3,
-        pose_image=skeleton_path,
-        control_strength=control_strength,
         seed=seed,
         style_config=style_config,
         free_memory=False,  # Already handled above
     )
-
-    # Cleanup temp skeleton if created
-    if temp_skeleton:
-        try:
-            Path(temp_skeleton.name).unlink()
-        except Exception:
-            pass
 
     return result
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate keyframe images using character assets and pose control",
+        description="Generate keyframe images using character reference images",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Single character with skeleton
+  # Single character
   python keyframe_generator.py \\
     --prompt "Athena in fighting stance" \\
     --character assets/characters/athena.png \\
-    --pose assets/poses/stance_skeleton.png \\
     --output keyframes/KF-A.png
 
-  # Extract pose from reference image
+  # With background
   python keyframe_generator.py \\
-    --prompt "Athena collapsed" \\
+    --prompt "Athena standing in ancient temple" \\
     --character assets/characters/athena.png \\
-    --pose-image refs/collapse.jpg \\
-    --output keyframes/KF-D.png
+    --background assets/backgrounds/temple.png \\
+    --output keyframes/KF-B.png
 
   # Multi-character scene
   python keyframe_generator.py \\
     --prompt "On the left: Athena blocking. On the right: Iori attacking" \\
     -c assets/characters/athena.png \\
     -c assets/characters/iori.png \\
-    --pose assets/poses/combat.png \\
-    --output keyframes/KF-B.png
+    --output keyframes/KF-C.png
 """
     )
 
@@ -266,18 +217,6 @@ Examples:
         help="Path to character identity asset (WHO). Can specify up to 3."
     )
 
-    # Pose options (at least one REQUIRED)
-    pose_group = parser.add_argument_group("Pose Control (one REQUIRED)")
-    pose_group.add_argument(
-        "--pose",
-        dest="pose_skeleton",
-        help="Path to pre-extracted pose skeleton image (stick figure on black)"
-    )
-    pose_group.add_argument(
-        "--pose-image",
-        help="Path to reference image to extract pose from (will run DWPose)"
-    )
-
     # Optional references
     ref_group = parser.add_argument_group("Optional References")
     ref_group.add_argument(
@@ -291,12 +230,6 @@ Examples:
 
     # Generation settings
     gen_group = parser.add_argument_group("Generation Settings")
-    gen_group.add_argument(
-        "--control-strength",
-        type=float,
-        default=0.8,
-        help="ControlNet strength for pose guidance (default: 0.8)"
-    )
     gen_group.add_argument(
         "--preset",
         choices=["low", "medium", "high"],
@@ -317,25 +250,12 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate pose arguments - at least one is REQUIRED per skill.md
-    if not args.pose_skeleton and not args.pose_image:
-        print_status("Either --pose or --pose-image is required for keyframe generation", "error")
-        print_status("For landscape scenes without characters, use: asset_generator.py background", "error")
-        sys.exit(1)
-
-    if args.pose_skeleton and args.pose_image:
-        print_status("Specify either --pose (skeleton) or --pose-image, not both", "warning")
-        print_status("Using --pose (pre-extracted skeleton)")
-
     generate_keyframe(
         prompt=args.prompt,
         output_path=args.output,
         characters=args.characters,
-        pose_skeleton=args.pose_skeleton,
-        pose_image=args.pose_image,
         background=args.background,
         style=args.style,
-        control_strength=args.control_strength,
         resolution_preset=args.preset,
         seed=args.seed,
         free_memory=args.free_memory,

@@ -4,7 +4,6 @@ Asset Generator for AI Video Producer.
 
 Generates reusable assets for keyframe generation:
 - Character identity references (neutral pose, clean background)
-- Pose skeletons (extracted from reference images)
 - Background references
 - Style references
 
@@ -19,7 +18,6 @@ from typing import Optional
 
 from core import (
     QwenImageGenerator,
-    extract_pose_skeleton,
     T2I_WORKFLOW,
     RESOLUTION_PRESETS,
     print_status,
@@ -169,97 +167,6 @@ def generate_style_asset(
     )
 
 
-def generate_pose_reference(
-    generator: QwenImageGenerator,
-    name: str,
-    pose_description: str,
-    output_path: str,
-    style: str = "anime",
-    seed: int = 0,
-) -> str:
-    """
-    Generate a clean pose reference image optimized for skeleton extraction.
-
-    Creates an image specifically designed for reliable DWPose detection:
-    - SINGLE character only (never multiple people)
-    - PLAIN background (solid color or simple gradient)
-    - FULL BODY visible (all limbs clearly shown, not cropped)
-    - CENTERED composition (character in middle of frame)
-    - NO VISUAL EFFECTS (no explosions, auras, particles, energy)
-    - CLEAR SILHOUETTE (body outline easy to distinguish)
-    - NEUTRAL LIGHTING (even lighting, no dramatic rays)
-    - SIMPLE CLOTHING (avoid flowing capes that obscure body)
-
-    Args:
-        generator: QwenImageGenerator instance
-        name: Pose name (for logging)
-        pose_description: Description of the pose/action (e.g., "fighting stance",
-                         "collapsed on ground", "victory pose arms raised")
-        output_path: Path to save the reference image
-        style: Art style (anime, realistic, etc.)
-        seed: Random seed for reproducibility
-
-    Returns:
-        Path to saved pose reference image
-    """
-    # Build prompt optimized for pose detection
-    # Key: simple background, single centered character, no effects
-    prompt = (
-        f"Single person in {pose_description}, "
-        f"full body visible from head to feet, centered in frame, "
-        f"simple plain solid gray background, "
-        f"neutral even studio lighting, no shadows, "
-        f"clear body silhouette, simple fitted clothing, "
-        f"no visual effects, no particles, no aura, no energy, "
-        f"no other people, no objects, clean simple composition, "
-        f"{style} art style, high quality"
-    )
-
-    print_status(f"Generating pose reference: {name}")
-    print_status(f"Pose: {pose_description}")
-
-    return generator.generate(
-        prompt=prompt,
-        output_path=output_path,
-        workflow_path=T2I_WORKFLOW,
-        seed=seed,
-    )
-
-
-def generate_pose_skeleton(
-    source_image: str,
-    output_path: str,
-    resolution: int = 832,
-) -> str:
-    """
-    Extract a pose skeleton from a reference image.
-
-    Uses DWPose to extract body keypoints from any image and save
-    as a skeleton visualization (stick figure on black background).
-
-    This skeleton can then be used with keyframe_generator.py to
-    control character poses without leaking the source character's appearance.
-
-    Args:
-        source_image: Path to image to extract pose from
-        output_path: Path to save skeleton image
-        resolution: Processing resolution
-
-    Returns:
-        Path to saved skeleton
-    """
-    print_status(f"Extracting pose skeleton from: {source_image}")
-
-    return extract_pose_skeleton(
-        image_path=source_image,
-        output_path=output_path,
-        resolution=resolution,
-        detect_body=True,
-        detect_hand=True,
-        detect_face=False,
-    )
-
-
 # =============================================================================
 # Batch Asset Generation
 # =============================================================================
@@ -343,23 +250,6 @@ def generate_assets_from_config(
         )
         results[f"style:{name}"] = str(style_output)
 
-    # Extract pose skeletons from pose reference images
-    poses = config.get("poses", {})
-    for name, pose_config in poses.items():
-        pose_output = output_dir / "poses" / f"{name}_skeleton.png"
-        ensure_output_dir(str(pose_output))
-
-        # If ref_image exists, extract skeleton from it
-        ref_image = pose_config.get("ref_image")
-        if ref_image and Path(ref_image).exists():
-            generate_pose_skeleton(
-                source_image=ref_image,
-                output_path=str(pose_output),
-            )
-            results[f"pose:{name}"] = str(pose_output)
-        else:
-            print_status(f"Pose reference not found for {name}: {ref_image}", "warning")
-
     print_status(f"Generated {len(results)} assets", "success")
     return results
 
@@ -401,23 +291,6 @@ def main():
     style_parser.add_argument("--output", "-o", required=True, help="Output path")
     style_parser.add_argument("--seed", type=int, default=0, help="Random seed")
     style_parser.add_argument("--free-memory", action="store_true", help="Free GPU memory first")
-
-    # Pose skeleton extraction command
-    pose_parser = subparsers.add_parser("pose", help="Extract pose skeleton from image")
-    pose_parser.add_argument("--source", "-s", required=True, help="Source image path")
-    pose_parser.add_argument("--output", "-o", required=True, help="Output skeleton path")
-    pose_parser.add_argument("--resolution", type=int, default=832, help="Processing resolution")
-
-    # Pose reference generation command (generates clean image for skeleton extraction)
-    pose_ref_parser = subparsers.add_parser("pose-ref", help="Generate clean pose reference image for skeleton extraction")
-    pose_ref_parser.add_argument("--name", "-n", required=True, help="Pose name (e.g., 'fighting_stance')")
-    pose_ref_parser.add_argument("--pose", "-p", required=True, help="Pose description (e.g., 'martial arts fighting stance, fists raised')")
-    pose_ref_parser.add_argument("--output", "-o", required=True, help="Output path for reference image")
-    pose_ref_parser.add_argument("--style", default="anime", help="Art style (default: anime)")
-    pose_ref_parser.add_argument("--seed", type=int, default=0, help="Random seed")
-    pose_ref_parser.add_argument("--free-memory", action="store_true", help="Free GPU memory first")
-    pose_ref_parser.add_argument("--extract-skeleton", action="store_true", help="Also extract skeleton after generating reference")
-    pose_ref_parser.add_argument("--skeleton-output", help="Output path for skeleton (required if --extract-skeleton)")
 
     # Batch generation from config
     batch_parser = subparsers.add_parser("batch", help="Generate all assets from config file")
@@ -469,44 +342,6 @@ def main():
             output_path=args.output,
             seed=args.seed,
         )
-
-    elif args.command == "pose":
-        generate_pose_skeleton(
-            source_image=args.source,
-            output_path=args.output,
-            resolution=args.resolution,
-        )
-
-    elif args.command == "pose-ref":
-        generator = QwenImageGenerator()
-        if args.free_memory:
-            generator.free_memory()
-
-        # Generate clean pose reference image
-        ref_path = generate_pose_reference(
-            generator=generator,
-            name=args.name,
-            pose_description=args.pose,
-            output_path=args.output,
-            style=args.style,
-            seed=args.seed,
-        )
-
-        # Optionally extract skeleton immediately
-        if args.extract_skeleton:
-            if not args.skeleton_output:
-                # Default skeleton output path
-                from pathlib import Path
-                ref_p = Path(args.output)
-                skeleton_output = str(ref_p.parent / f"{ref_p.stem}_skeleton.png")
-            else:
-                skeleton_output = args.skeleton_output
-
-            print_status("Extracting skeleton from generated reference...")
-            generate_pose_skeleton(
-                source_image=ref_path,
-                output_path=skeleton_output,
-            )
 
     elif args.command == "batch":
         generate_assets_from_config(

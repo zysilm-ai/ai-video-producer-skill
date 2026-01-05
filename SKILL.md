@@ -8,7 +8,7 @@ description: >
   keyframe generation, or video prompt writing. Follows a philosophy-first
   approach: establish visual style and production philosophy, then execute
   scene by scene with user feedback at each stage. Supports advanced features
-  like layer-based compositing, pose transfer (ControlNet), and style
+  like layer-based compositing, reference-based generation, and style
   consistency. Runs locally on RTX 3080+ (10GB+ VRAM).
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, TodoWrite
 ---
@@ -129,7 +129,7 @@ KF-A (generated) → Scene 1 → KF-B (extracted) → Scene 2 → KF-C (extracte
 ```
 
 **Pros:** Perfect visual continuity between scenes (same camera, lighting, position)
-**Cons:** Less control over specific end poses
+**Cons:** Less control over specific end frame composition
 
 ## Pipeline Mode Selection (REQUIRED - Ask First)
 
@@ -137,7 +137,7 @@ KF-A (generated) → Scene 1 → KF-B (extracted) → Scene 2 → KF-C (extracte
 
 Use AskUserQuestion with these options:
 - **"Video-First (Recommended)"** - Best for visual continuity. Only first keyframe is generated; subsequent keyframes are extracted from video last frames.
-- **"Keyframe-First"** - Best when you need precise control over specific end poses. All keyframes generated independently.
+- **"Keyframe-First"** - Best when you need precise control over specific end frame composition. All keyframes generated independently.
 
 **Default recommendation:** Video-First solves background inconsistency issues between scenes.
 
@@ -294,11 +294,11 @@ Before creating scenes, determine:
 
 Define all unique keyframes first. **Adjacent scenes share their boundary keyframe for perfect continuity.**
 
-| ID | Description | Pose Asset | Character | Background | Used In |
-|----|-------------|------------|-----------|------------|---------|
-| KF-A | [Description of this moment] | [pose].png | [character] | [background] | Scene 1 start |
-| KF-B | [Description of this moment] | [pose].png | [character] | [background] | Scene 1 end, Scene 2 start |
-| KF-C | [Description of this moment] | [pose].png | [character] | [background] | Scene 2 end |
+| ID | Description | Character | Background | Used In |
+|----|-------------|-----------|------------|---------|
+| KF-A | [Description of this moment] | [character] | [background] | Scene 1 start |
+| KF-B | [Description of this moment] | [character] | [background] | Scene 1 end, Scene 2 start |
+| KF-C | [Description of this moment] | [character] | [background] | Scene 2 end |
 
 **Important:** Keyframes marked with multiple scenes (e.g., "Scene 1 end, Scene 2 start") are SHARED.
 Generate once in \ folder, use for both scenes. This ensures perfect video continuity.
@@ -393,7 +393,6 @@ This phase creates reusable assets that maintain consistency across all scenes.
 Review `scene-breakdown.md` and identify all unique:
 - Characters (each character that appears in scenes)
 - Backgrounds (each unique location/environment)
-- Poses (each unique character pose needed)
 - Styles (the visual style to apply consistently)
 - Objects (any recurring props or items)
 
@@ -413,16 +412,6 @@ Review `scene-breakdown.md` and identify all unique:
     "temple_courtyard": {
       "description": "Ancient temple with cherry blossoms, stone paths, morning light",
       "ref_image": "assets/backgrounds/temple_courtyard.png"
-    }
-  },
-  "poses": {
-    "standing": {
-      "description": "Upright neutral stance, arms at sides",
-      "ref_image": "assets/poses/standing.png"
-    },
-    "meditation": {
-      "description": "Seated cross-legged, hands on knees, eyes closed",
-      "ref_image": "assets/poses/meditation.png"
     }
   },
   "styles": {
@@ -447,7 +436,6 @@ Create the `assets/` directory structure and generate each asset:
 ```bash
 mkdir -p {output_dir}/assets/characters
 mkdir -p {output_dir}/assets/backgrounds
-mkdir -p {output_dir}/assets/poses
 mkdir -p {output_dir}/assets/styles
 mkdir -p {output_dir}/assets/objects
 ```
@@ -467,46 +455,12 @@ python {baseDir}/scripts/asset_generator.py background \
   --description "[detailed environment description]" \
   --output {output_dir}/assets/backgrounds/[name].png
 
-# Pose reference + skeleton (RECOMMENDED - generates clean image for reliable extraction)
-# Step 1: Generate a clean pose reference image optimized for skeleton detection
-# Step 2: Extract skeleton from the clean reference
-python {baseDir}/scripts/asset_generator.py pose-ref \
-  --name [pose_name] \
-  --pose "[pose description - just the body position, e.g., 'fighting stance fists raised']" \
-  --output {output_dir}/assets/poses/refs/[pose_name].png \
-  --extract-skeleton \
-  --skeleton-output {output_dir}/assets/poses/[pose_name]_skeleton.png
-
-# Alternative: Extract skeleton from existing image (may fail on complex images)
-# python {baseDir}/scripts/asset_generator.py pose \
-#   --source [path/to/reference_image.jpg] \
-#   --output {output_dir}/assets/poses/[pose_name]_skeleton.png
-
 # Style reference (example image in target style)
 python {baseDir}/scripts/asset_generator.py style \
   --name [style_name] \
   --description "[style description]" \
   --output {output_dir}/assets/styles/[name].png
 ```
-
-**IMPORTANT - Pose Assets:**
-- Pose assets are **skeletons only** (stick figures on black background)
-- They are extracted from reference images using DWPose
-- They do NOT contain any character appearance - only body position
-- This allows applying any pose to any character without identity leakage
-
-**POSE REFERENCE IMAGE REQUIREMENTS (for reliable skeleton extraction):**
-When generating pose reference images, follow these rules to ensure DWPose can detect the skeleton:
-1. **SINGLE CHARACTER ONLY** - never multiple people in frame
-2. **PLAIN BACKGROUND** - solid gray/white, no scenery or architecture
-3. **FULL BODY VISIBLE** - all limbs shown, not cropped
-4. **CENTERED COMPOSITION** - character in middle of frame
-5. **NO VISUAL EFFECTS** - no explosions, auras, particles, energy, fire
-6. **CLEAR SILHOUETTE** - body outline easy to distinguish
-7. **SIMPLE CLOTHING** - avoid flowing capes/robes that obscure body shape
-
-**BAD pose description:** "Epic fighting stance with energy explosion in temple arena"
-**GOOD pose description:** "fighting stance, fists raised, legs apart"
 
 ### Step 2.5.4: CHECKPOINT - Get User Approval
 
@@ -560,14 +514,6 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
         "output": "assets/backgrounds/<background_id>.png",
         "status": "pending"
       }
-    },
-    "poses": {
-      "<pose_id>": {
-        "type": "generate",
-        "prompt": "Pose description for skeleton generation",
-        "output": "assets/poses/<pose_id>_skeleton.png",
-        "status": "pending"
-      }
     }
   },
 
@@ -578,9 +524,7 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
       "prompt": "Scene description with character positions and actions...",
       "background": "<background_id>",
       "characters": ["<character_id_1>", "<character_id_2>"],
-      "pose": "<pose_id>",
       "settings": {
-        "control_strength": 0.8,
         "preset": "medium"
       },
       "output": "keyframes/KF-A.png",
@@ -617,8 +561,7 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
 
   "assets": {
     "characters": { ... },
-    "backgrounds": { ... },
-    "poses": { ... }
+    "backgrounds": { ... }
   },
 
   "first_keyframe": {
@@ -627,7 +570,6 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
     "prompt": "First scene starting point - detailed visual description...",
     "background": "<background_id>",
     "characters": [],
-    "pose": null,
     "settings": {
       "preset": "medium"
     },
@@ -674,11 +616,6 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
 - Describe setting, lighting, atmosphere
 - Include "no people, establishing shot"
 - Match style from philosophy.md
-
-**For Pose Prompts:**
-- Describe body positions only, NO character appearance
-- Use simple language: "two people, left person [action], right person [action]"
-- Follow pose reference image requirements from Phase 2.5
 
 **For Keyframe Prompts:**
 - Use positional language: "On the left:", "On the right:", "In the center:"
@@ -764,7 +701,7 @@ python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --stage 
 ```
 
 This will:
-- Generate all characters, backgrounds, poses defined in pipeline.json
+- Generate all characters, backgrounds defined in pipeline.json
 - Automatically use `--free-memory` for each generation
 - Update status in pipeline.json as items complete
 
@@ -775,7 +712,6 @@ After execution completes, use the Read tool to view each generated asset:
 ```
 1. View each character asset - verify appearance matches description
 2. View each background asset - verify setting and style
-3. View each pose skeleton - verify body positions are correct
 ```
 
 ### Step 4.3: CHECKPOINT - Get User Approval
@@ -816,9 +752,8 @@ After execution completes, use the Read tool to view each keyframe:
 ```
 1. View each keyframe image
 2. Check character consistency with assets
-3. Check pose matches skeleton
-4. Check background consistency
-5. Check style matches philosophy
+3. Check background consistency
+4. Check style matches philosophy
 ```
 
 ### Step 5.3: CHECKPOINT - Get User Approval
@@ -910,7 +845,6 @@ Keyframe generation uses different flows based on scene type from `scene-breakdo
 | Asset Type | Chain Behavior |
 |------------|----------------|
 | **Character Identity** | ALWAYS use original asset from `assets/characters/` (never chain) |
-| **Character Pose** | Reference from `assets/poses/` per keyframe |
 | **Background** | Chain from previous scene's background for continuity |
 | **Style** | ALWAYS apply with style asset reference |
 
@@ -930,7 +864,6 @@ mkdir -p {output_dir}/scene-02
 
 **Use `keyframe_generator.py` which properly separates:**
 - **Identity** (WHO) - from `--character` asset
-- **Pose** (WHAT position) - from `--pose` skeleton
 - **Action** (WHAT happening) - from `--prompt`
 
 **Single character keyframe:**
@@ -939,7 +872,6 @@ python {baseDir}/scripts/keyframe_generator.py \
   --free-memory \
   --prompt "[Action description], [expression], [environment context]" \
   --character {output_dir}/assets/characters/[character_name].png \
-  --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
   --output {output_dir}/keyframes/KF-A.png
 ```
 
@@ -952,7 +884,6 @@ python {baseDir}/scripts/keyframe_generator.py \
   --prompt "On the left: [Character A action]. On the right: [Character B action]. [Scene context]" \
   --character {output_dir}/assets/characters/[character_a].png \
   --character {output_dir}/assets/characters/[character_b].png \
-  --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
   --output {output_dir}/keyframes/KF-B.png
 ```
 
@@ -966,7 +897,6 @@ python {baseDir}/scripts/keyframe_generator.py \
   --background {output_dir}/assets/backgrounds/[background_name].png \
   --character {output_dir}/assets/characters/[character_a].png \
   --character {output_dir}/assets/characters/[character_b].png \
-  --pose {output_dir}/assets/poses/[pose_name]_skeleton.png \
   --output {output_dir}/keyframes/KF-B.png
 ```
 
@@ -979,16 +909,46 @@ python {baseDir}/scripts/keyframe_generator.py \
 
 **Note:** With `--background`, maximum 2 characters are supported (3 reference slots total).
 
-**Extract pose on-the-fly from reference image:**
+### Character Count Decision Matrix
+
+The system has 3 reference image slots. Use this matrix to determine the approach:
+
+| # Characters | Background | Approach |
+|--------------|------------|----------|
+| 0 | Any | Use `landscape` type with `asset_generator.py background` |
+| 1 | No | `--character A` (empty slots auto-filled with fallback) |
+| 1 | Yes | `--background B --character A` (empty slot auto-filled) |
+| 2 | No | `--character A --character B` (slot 3 auto-filled) |
+| 2 | Yes | `--background B --character A --character B` (all slots used) |
+| 3 | No | `--character A --character B --character C` (all slots used) |
+| 3+ | Yes | **Workaround required** - see below |
+| 4+ | Any | **Workaround required** - see below |
+
+**Handling 3+ Characters with Background OR 4+ Characters Total:**
+
+When exceeding 3 reference slots, use this workaround:
+
+1. **Select 2-3 most important characters** for reference slots (strongest identity consistency)
+2. **Describe ALL characters in prompt** with positional language:
+   ```
+   "On the far left: [char1 detailed appearance]. In the center: [char2 detailed appearance].
+   On the right: [char3 detailed appearance]. Behind them: [char4 detailed appearance]."
+   ```
+3. **Trade-off**: Referenced characters have strong identity; others rely on prompt description
+
+**Example for 4 characters with background:**
 ```bash
-# If you have a reference photo/artwork showing the desired pose
+# Generate with 2 most important characters as references
 python {baseDir}/scripts/keyframe_generator.py \
   --free-memory \
-  --prompt "[Action description]" \
-  --character {output_dir}/assets/characters/[character_name].png \
-  --pose-image [path/to/reference_photo.jpg] \
-  --output {output_dir}/keyframes/KF-C.png
+  --prompt "On the left: warrior in red armor with sword. Second from left: mage in blue robes with staff. On the right: archer in green cloak with bow. Far right: healer in white dress with golden hair." \
+  --background {output_dir}/assets/backgrounds/battlefield.png \
+  --character {output_dir}/assets/characters/warrior.png \
+  --character {output_dir}/assets/characters/mage.png \
+  --output {output_dir}/keyframes/KF-group.png
 ```
+
+In this example, warrior and mage have strong identity from references; archer and healer are generated from prompt descriptions.
 
 ### Step 3.3: Landscape Scene Generation (type: landscape)
 
@@ -1011,11 +971,6 @@ python {baseDir}/scripts/asset_generator.py background \
 # CORRECT - always use original character asset
 --character {output_dir}/assets/characters/[character_name].png
 ```
-
-**Pose skeletons control body position without identity leakage:**
-- The skeleton is just a stick figure - no character appearance
-- Different skeletons = dramatically different poses
-- Same character asset + different skeleton = same character in different pose
 
 ### Step 3.5: Keyframe Quality Checklist
 
@@ -1148,10 +1103,6 @@ If user requests changes:
 │   ├── backgrounds/
 │   │   ├── temple_courtyard.png
 │   │   └── mountain_sunset.png
-│   ├── poses/
-│   │   ├── standing.png
-│   │   ├── meditation.png
-│   │   └── fighting.png
 │   ├── styles/
 │   │   └── ghibli.png
 │   └── objects/
@@ -1252,7 +1203,7 @@ If models are missing, the setup script will download them automatically.
 
 **RULES:**
 
-1. **ALWAYS use `--free-memory` for EVERY keyframe generation** - Memory fragmentation between generations can cause ControlNet to consume all VRAM, leaving no room for the diffusion model (resulting in 20+ minute generation times instead of ~5 minutes)
+1. **ALWAYS use `--free-memory` for EVERY keyframe generation** - Memory fragmentation between generations can cause VRAM issues, resulting in slower generation times
 
 2. **ALWAYS use `--free-memory` when switching between image and video generation**
 
@@ -1267,12 +1218,12 @@ If models are missing, the setup script will download them automatically.
 ```bash
 # Generate assets (Qwen stays warm between asset generations)
 python asset_generator.py character --name hero --description "..." --output assets/hero.png
-python asset_generator.py pose --source ref.jpg --output assets/poses/action.png
+python asset_generator.py background --name forest --description "..." --output assets/backgrounds/forest.png
 
 # Generate keyframes - ALWAYS use --free-memory to prevent VRAM fragmentation
-python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/action.png --prompt "..." --output keyframes/KF-A.png
-python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/rest.png --prompt "..." --output keyframes/KF-B.png
-python keyframe_generator.py --free-memory --character assets/hero.png --pose assets/poses/fall.png --prompt "..." --output keyframes/KF-C.png
+python keyframe_generator.py --free-memory --character assets/hero.png --prompt "hero standing ready" --output keyframes/KF-A.png
+python keyframe_generator.py --free-memory --character assets/hero.png --prompt "hero in combat" --output keyframes/KF-B.png
+python keyframe_generator.py --free-memory --character assets/hero.png --prompt "hero victorious" --output keyframes/KF-C.png
 
 # Switch to video - FREE MEMORY FIRST
 python wan_video_comfyui.py --free-memory --prompt "..." --start-frame keyframes/KF-A.png --end-frame keyframes/KF-B.png --output video1.mp4
@@ -1282,10 +1233,9 @@ python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --en
 ```
 
 **Why `--free-memory` is mandatory for keyframes:**
-- Multi-reference keyframe generation uses: Text Encoder (~8GB) + ControlNet (~3GB) + Diffusion Model (~12GB)
-- Without clearing memory between generations, ControlNet may load first and consume all available VRAM
-- This forces the diffusion model to run from CPU offload (0 MB in VRAM), causing 20+ minute generation times
-- With `--free-memory`, each generation starts fresh with optimal memory allocation (~5 minutes)
+- Multi-reference keyframe generation uses: Text Encoder (~8GB) + Diffusion Model (~6GB)
+- Without clearing memory between generations, models may not load optimally
+- With `--free-memory`, each generation starts fresh with optimal memory allocation (~2 minutes)
 
 ---
 
@@ -1294,8 +1244,8 @@ python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --en
 | Script | Purpose | Key Arguments |
 |--------|---------|---------------|
 | `execute_pipeline.py` | Execute complete pipeline | `--stage`, `--all`, `--status`, `--validate`, `--regenerate` |
-| `asset_generator.py` | Generate reusable assets | `character`, `background`, `pose`, `style` subcommands |
-| `keyframe_generator.py` | Generate keyframes with identity+pose separation | `--prompt`, `--character`, `--background`, `--pose`, `--output` |
+| `asset_generator.py` | Generate reusable assets | `character`, `background`, `style` subcommands |
+| `keyframe_generator.py` | Generate keyframes with character references | `--prompt`, `--character`, `--background`, `--output` |
 | `angle_transformer.py` | Transform keyframe camera angles | `--input`, `--output`, `--rotate`, `--tilt`, `--zoom` |
 | `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output`, `--free-memory` |
 | `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
@@ -1317,8 +1267,6 @@ python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --en
 |------------|---------|--------|
 | **Character** | `asset_generator.py character --name X --description "..." -o path` | Neutral A-pose, white background |
 | **Background** | `asset_generator.py background --name X --description "..." -o path` | Environment, no people |
-| **Pose Reference** | `asset_generator.py pose-ref --name X --pose "..." -o path --extract-skeleton` | Clean ref + skeleton (RECOMMENDED) |
-| **Pose Skeleton** | `asset_generator.py pose --source ref.jpg -o path` | Extract from existing image |
 | **Style** | `asset_generator.py style --name X --description "..." -o path` | Style reference |
 
 ### Keyframe Generation
@@ -1327,9 +1275,8 @@ python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --en
 
 | Mode | Command | Description |
 |------|---------|-------------|
-| **Single Character** | `keyframe_generator.py --free-memory --character X --pose Y --prompt "..."` | Character with pose control |
-| **Multi-Character** | `keyframe_generator.py --free-memory --character A --character B --pose Y --prompt "..."` | Up to 3 characters |
-| **Pose from Image** | `keyframe_generator.py --free-memory --character X --pose-image ref.jpg --prompt "..."` | Extract pose on-the-fly |
+| **Single Character** | `keyframe_generator.py --free-memory --character X --prompt "..."` | Character from reference |
+| **Multi-Character** | `keyframe_generator.py --free-memory --character A --character B --prompt "..."` | Up to 3 characters |
 | **With Background** | `keyframe_generator.py --free-memory --background B --character X --character Y ...` | Background + 2 chars |
 
 ### Camera Angle Transformation

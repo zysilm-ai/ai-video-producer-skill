@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Core utilities for AI Video Producer image generation.
-Shared functionality for asset generation, keyframe generation, and pose extraction.
+Shared functionality for asset generation and keyframe generation.
 
 This module preserves all existing GGUF, LoRA, and memory management logic
 from qwen_image_comfyui.py while providing a cleaner API for new scripts.
@@ -59,8 +59,7 @@ DEFAULT_NEGATIVE = "bad quality, worst quality, blurry, distorted, deformed, ugl
 
 # Workflow paths
 T2I_WORKFLOW = WORKFLOW_DIR / "qwen_t2i.json"
-POSE_WORKFLOW = WORKFLOW_DIR / "qwen_pose.json"
-DWPOSE_WORKFLOW = WORKFLOW_DIR / "dwpose_extract.json"
+REFERENCE_WORKFLOW = WORKFLOW_DIR / "qwen_reference.json"
 MULTIANGLE_WORKFLOW = WORKFLOW_DIR / "qwen_multiangle.json"
 
 # Multi-Angle LoRA for camera control
@@ -144,7 +143,6 @@ def update_workflow_images(
     reference: str = None,
     reference2: str = None,
     reference3: str = None,
-    pose: str = None
 ) -> dict:
     """Update image inputs in workflow.
 
@@ -152,7 +150,14 @@ def update_workflow_images(
     - reference: image1 slot (background or character 1)
     - reference2: image2 slot (character 1 or 2)
     - reference3: image3 slot (character 2 or 3)
+
+    When reference2/reference3 are not provided, falls back to the primary reference
+    to satisfy workflow requirements (ComfyUI LoadImage nodes require valid images).
     """
+    # Use primary reference as fallback for missing references
+    ref2_final = reference2 if reference2 else reference
+    ref3_final = reference3 if reference3 else reference
+
     for node_id, node in workflow.items():
         if not isinstance(node, dict):
             continue
@@ -167,20 +172,15 @@ def update_workflow_images(
                 if reference:
                     workflow[node_id]["inputs"]["image"] = reference
 
-            # Reference image 2
+            # Reference image 2 (with fallback)
             elif current_image == "{{REFERENCE2}}":
-                if reference2:
-                    workflow[node_id]["inputs"]["image"] = reference2
+                if ref2_final:
+                    workflow[node_id]["inputs"]["image"] = ref2_final
 
-            # Reference image 3
+            # Reference image 3 (with fallback)
             elif current_image == "{{REFERENCE3}}":
-                if reference3:
-                    workflow[node_id]["inputs"]["image"] = reference3
-
-            # Pose image
-            elif current_image == "{{POSE}}":
-                if pose:
-                    workflow[node_id]["inputs"]["image"] = pose
+                if ref3_final:
+                    workflow[node_id]["inputs"]["image"] = ref3_final
 
     return workflow
 
@@ -195,8 +195,6 @@ def update_workflow_resolution(
         "EmptyQwenImageLayeredLatentImage",
         "EmptySD3LatentImage",
         "ImageScale",
-        "OpenposePreprocessor",
-        "DWPreprocessor",
     ]
 
     for node_id, node in workflow.items():
@@ -211,9 +209,6 @@ def update_workflow_resolution(
                 workflow[node_id]["inputs"]["width"] = width
             if height is not None and "height" in inputs:
                 workflow[node_id]["inputs"]["height"] = height
-            # OpenposePreprocessor/DWPreprocessor uses 'resolution' instead of width/height
-            if class_type in ["OpenposePreprocessor", "DWPreprocessor"] and width is not None:
-                workflow[node_id]["inputs"]["resolution"] = width
 
     return workflow
 
@@ -246,24 +241,6 @@ def update_workflow_sampler(
         if class_type == "ModelSamplingAuraFlow":
             if shift is not None:
                 workflow[node_id]["inputs"]["shift"] = shift
-
-    return workflow
-
-
-def update_workflow_controlnet(
-    workflow: dict,
-    control_strength: float = None,
-) -> dict:
-    """Update ControlNet strength in workflow."""
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-
-        class_type = node.get("class_type", "")
-
-        if class_type == "ControlNetApplySD3":
-            if control_strength is not None:
-                workflow[node_id]["inputs"]["strength"] = control_strength
 
     return workflow
 
@@ -342,8 +319,6 @@ class QwenImageGenerator:
         reference_image: str = None,
         reference_image2: str = None,
         reference_image3: str = None,
-        pose_image: str = None,
-        control_strength: float = 0.9,
         width: int = None,
         height: int = None,
         seed: int = 0,
@@ -351,7 +326,7 @@ class QwenImageGenerator:
         cfg: float = 1.0,
         shift: float = 5.0,
         style_config: dict = None,
-        timeout: int = 600,  # 10 min for multi-reference workflows with --cache-none
+        timeout: int = 300,  # 5 min default (no ControlNet = faster generation)
         free_memory: bool = False,
     ) -> str:
         """
@@ -364,8 +339,6 @@ class QwenImageGenerator:
             reference_image: Reference image 1 (background or character 1)
             reference_image2: Reference image 2 (character 1 or 2)
             reference_image3: Reference image 3 (character 2 or 3)
-            pose_image: Optional pose image (skeleton) for ControlNet
-            control_strength: ControlNet strength (0.0 - 1.0)
             width: Image width (or use preset)
             height: Image height (or use preset)
             seed: Random seed (0 for random)
@@ -412,7 +385,6 @@ class QwenImageGenerator:
         ref_image_name = None
         ref_image_name2 = None
         ref_image_name3 = None
-        pose_image_name = None
 
         if reference_image:
             print_status("Uploading reference image to ComfyUI...", "progress")
@@ -426,17 +398,12 @@ class QwenImageGenerator:
             print_status("Uploading reference image 3 to ComfyUI...", "progress")
             ref_image_name3 = self._upload_image(reference_image3, "reference3")
 
-        if pose_image:
-            print_status("Uploading pose image to ComfyUI...", "progress")
-            pose_image_name = self._upload_image(pose_image, "pose")
-
         # Update workflow with all parameters
         workflow = update_workflow_model(workflow, self.model_name, self.lora_name)
         workflow = update_workflow_prompts(workflow, enhanced_prompt)
-        workflow = update_workflow_images(workflow, ref_image_name, ref_image_name2, ref_image_name3, pose_image_name)
+        workflow = update_workflow_images(workflow, ref_image_name, ref_image_name2, ref_image_name3)
         workflow = update_workflow_resolution(workflow, width, height)
         workflow = update_workflow_sampler(workflow, steps, cfg, seed, shift)
-        workflow = update_workflow_controlnet(workflow, control_strength)
 
         # Execute workflow
         print_status("Submitting image generation request...", "progress")
@@ -490,114 +457,3 @@ class QwenImageGenerator:
         except Exception as e:
             print_status(f"Generation failed: {e}", "error")
             sys.exit(1)
-
-
-# =============================================================================
-# Pose Extraction
-# =============================================================================
-
-def extract_pose_skeleton(
-    image_path: str,
-    output_path: str,
-    resolution: int = 832,
-    detect_body: bool = True,
-    detect_hand: bool = True,
-    detect_face: bool = False,
-    timeout: int = 120,
-) -> str:
-    """
-    Extract pose skeleton from an image using DWPose.
-
-    This uses the DWPose preprocessor to extract a stick-figure skeleton
-    from any image (photo, artwork, etc.) for use as pose reference.
-
-    Args:
-        image_path: Path to source image
-        output_path: Path to save skeleton image
-        resolution: Processing resolution (default 832)
-        detect_body: Detect body keypoints
-        detect_hand: Detect hand keypoints
-        detect_face: Detect face keypoints
-        timeout: Maximum wait time
-
-    Returns:
-        Path to saved skeleton image
-    """
-    client = ComfyUIClient()
-
-    if not client.is_available():
-        print_status("ComfyUI server not available!", "error")
-        sys.exit(1)
-
-    if not Path(image_path).exists():
-        print_status(f"Image not found: {image_path}", "error")
-        sys.exit(1)
-
-    # Check if DWPose workflow exists
-    if not DWPOSE_WORKFLOW.exists():
-        print_status(f"DWPose workflow not found: {DWPOSE_WORKFLOW}", "error")
-        print_status("Please ensure dwpose_extract.json is in the workflows folder", "error")
-        sys.exit(1)
-
-    print_status(f"Extracting pose skeleton from: {image_path}")
-
-    # Upload image
-    try:
-        result = client.upload_image(image_path)
-        uploaded_name = result["name"]
-        print_status(f"Uploaded: {uploaded_name}")
-    except Exception as e:
-        print_status(f"Failed to upload image: {e}", "error")
-        sys.exit(1)
-
-    # Load and update workflow
-    workflow = load_workflow(str(DWPOSE_WORKFLOW))
-
-    # Update image input
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-        if node.get("class_type") == "LoadImage":
-            workflow[node_id]["inputs"]["image"] = uploaded_name
-
-    # Update DWPose settings
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-        if node.get("class_type") == "DWPreprocessor":
-            workflow[node_id]["inputs"]["detect_body"] = "enable" if detect_body else "disable"
-            workflow[node_id]["inputs"]["detect_hand"] = "enable" if detect_hand else "disable"
-            workflow[node_id]["inputs"]["detect_face"] = "enable" if detect_face else "disable"
-            workflow[node_id]["inputs"]["resolution"] = resolution
-
-    # Execute
-    start_time = time.time()
-
-    def on_progress(msg):
-        elapsed = time.time() - start_time
-        print_status(f"{msg} ({format_duration(elapsed)})", "progress")
-
-    try:
-        result = client.execute_workflow(
-            workflow,
-            timeout=timeout,
-            on_progress=on_progress,
-            validate=True,
-        )
-
-        images = client.get_output_images(result)
-        if not images:
-            print_status("No skeleton generated!", "error")
-            sys.exit(1)
-
-        output = ensure_output_dir(output_path)
-        client.download_output(images[0], str(output))
-
-        total_time = time.time() - start_time
-        print_status(f"Skeleton saved to: {output_path} ({format_duration(total_time)})", "success")
-
-        return str(output)
-
-    except Exception as e:
-        print_status(f"Skeleton extraction failed: {e}", "error")
-        sys.exit(1)
