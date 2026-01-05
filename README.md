@@ -429,22 +429,18 @@ python scripts/setup_comfyui.py --q6k        # Download WAN 2.2 MoE models (opti
 gemini-video-producer-skill/
 ├── SKILL.md                    # Claude Code skill instructions
 ├── README.md                   # This file
-├── SETUP.md                    # Detailed diffusers setup (legacy)
 ├── scripts/
-│   ├── execute_pipeline.py     # Pipeline executor (deterministic execution)
-│   ├── asset_generator.py      # Generate character/background/pose/style assets
-│   ├── keyframe_generator.py   # Generate keyframes with identity+pose separation
+│   ├── execute_pipeline.py     # Pipeline executor
+│   ├── asset_generator.py      # Generate character/background/pose assets
+│   ├── keyframe_generator.py   # Generate keyframes with pose control
 │   ├── angle_transformer.py    # Transform keyframe camera angles
-│   ├── wan_video_comfyui.py    # Video generation (ComfyUI)
+│   ├── wan_video_comfyui.py    # Video generation (WAN 2.1/2.2)
 │   ├── setup_comfyui.py        # ComfyUI setup and server management
 │   ├── core.py                 # Shared generation utilities
 │   ├── comfyui_client.py       # ComfyUI API client
 │   ├── utils.py                # Shared utilities
 │   └── workflows/              # ComfyUI workflow JSON files
-│       ├── qwen_t2i.json       # Text-to-Image
-│       ├── qwen_edit.json      # Edit with reference
-│       ├── qwen_pose.json      # Pose-guided generation
-│       ├── qwen_multiangle.json # Camera angle transformation
+│       ├── qwen_*.json         # Image generation workflows
 │       ├── dwpose_extract.json # Skeleton extraction
 │       ├── wan_i2v.json        # Image-to-Video (WAN 2.1)
 │       ├── wan_flf2v.json      # First-Last-Frame-to-Video
@@ -544,14 +540,6 @@ If multi-reference keyframe generation (background + 2 characters + pose) takes 
 3. **What `--cache-none` does**: Allows ComfyUI to unload the text encoder after encoding is complete, freeing ~8GB VRAM for the diffusion sampling stage.
 
 See [references/troubleshooting.md](references/troubleshooting.md) for more solutions.
-
----
-
-## Legacy: Diffusers Backend
-
-The `scripts/qwen_image.py` and `scripts/wan_video.py` scripts use HuggingFace diffusers directly. These are kept for compatibility but are **not recommended** for 10GB VRAM cards due to slower performance from CPU offloading.
-
-Use the ComfyUI scripts (`*_comfyui.py`) for best performance.
 
 ---
 
