@@ -2,6 +2,31 @@
 
 A Claude Code skill for complete AI video production workflows using **WAN 2.1** video generation and **Qwen Image Edit 2511** keyframe generation via **ComfyUI**. Runs entirely locally on consumer GPUs (RTX 3080+ with 10GB+ VRAM).
 
+## Usage with Claude Code
+
+Simply describe what video you want to create. Claude will automatically:
+- Start ComfyUI server if needed
+- Guide you through the production workflow
+- Generate keyframes and videos with your approval at each step
+
+**Example conversation:**
+```
+You: Create a 15-second anime fight scene with two warriors
+
+Claude: I'll help you create that video. Let me start by establishing
+a Production Philosophy and breaking down the scenes...
+```
+
+**Example with meme:**
+```
+You: Create a video from meme "I want to save money vs you only live once"
+
+Claude: I'll create a relatable lifestyle video capturing the internal
+struggle. Let me plan the story and visual style...
+```
+
+---
+
 ## Overview
 
 This skill guides you through creating professional AI-generated videos with a structured, iterative workflow:
@@ -53,7 +78,9 @@ The philosophy-first approach ensures visual coherence across all scenes, result
 
 ---
 
-## Quick Start
+## Standalone Generation
+
+For programmatic or manual usage without Claude Code.
 
 ### 1. Setup (First Time Only)
 
@@ -105,23 +132,6 @@ python scripts/wan_video_comfyui.py \
   --prompt "The warrior charges forward, cape flowing" \
   --start-frame outputs/keyframes/KF-A.png \
   --output outputs/video.mp4
-```
-
----
-
-## Usage with Claude Code
-
-Simply describe what video you want to create. Claude will automatically:
-- Start ComfyUI server if needed
-- Guide you through the production workflow
-- Generate keyframes and videos with your approval at each step
-
-**Example conversation:**
-```
-You: Create a 15-second anime fight scene with two warriors
-
-Claude: I'll help you create that video. Let me start by establishing
-a Production Philosophy and breaking down the scenes...
 ```
 
 ---
