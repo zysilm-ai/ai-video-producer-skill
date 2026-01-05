@@ -174,6 +174,8 @@ The skill uses ComfyUI with GGUF quantized models for efficient GPU memory usage
 
 ### Models (GGUF Quantized)
 
+**Default Models (~40GB):**
+
 | Component | Model | Size | Purpose |
 |-----------|-------|------|---------|
 | Video Generation | WAN 2.1 I2V Q4_K_M | 11.3GB | 14B video transformer |
@@ -183,7 +185,16 @@ The skill uses ComfyUI with GGUF quantized models for efficient GPU memory usage
 | Text Encoders | UMT5-XXL + Qwen VL 7B | 13GB | FP8 quantized |
 | VAEs | WAN + Qwen | 0.4GB | Video/Image decoding |
 
-**Total: ~40GB** (stored in `./comfyui/models/`)
+**Optional WAN 2.2 MoE Models (+24GB):**
+
+| Component | Model | Size | Purpose |
+|-----------|-------|------|---------|
+| HighNoise Expert | WAN 2.2 I2V Q6_K | 12GB | MoE early denoising |
+| LowNoise Expert | WAN 2.2 I2V Q6_K | 12GB | MoE refinement |
+
+Download with: `python scripts/setup_comfyui.py --q6k`
+
+**Total: ~40GB base** (+ ~24GB optional for WAN 2.2)
 
 ### Performance (RTX 3080 10GB)
 
@@ -323,7 +334,7 @@ python scripts/keyframe_generator.py \
 
 ### wan_video_comfyui.py
 
-Generate videos from keyframes using WAN 2.1.
+Generate videos from keyframes using WAN 2.1/2.2.
 
 ```bash
 python scripts/wan_video_comfyui.py \
@@ -334,6 +345,9 @@ python scripts/wan_video_comfyui.py \
   [--preset low|medium|high]        # Resolution preset
   [--steps 8]                       # Sampling steps
   [--seed 0]                        # Random seed
+  [--moe]                           # WAN 2.2 MoE (best quality, slow)
+  [--moe-fast]                      # WAN 2.2 MoE + LoRA (better quality)
+  [--alg]                           # WAN 2.2 MoE + ALG (enhanced motion)
 ```
 
 **Video Modes:**
@@ -342,6 +356,17 @@ python scripts/wan_video_comfyui.py \
 |------|-----------|----------|
 | I2V | `--start-frame` only | Continuous motion from single frame |
 | FLF2V | `--start-frame` + `--end-frame` | Precise control over motion |
+
+**Model Selection:**
+
+| Flag | Model | Time | Best For |
+|------|-------|------|----------|
+| (none) | WAN 2.1 Q4K + LoRA | ~6 min | Default, fastest |
+| `--moe-fast` | WAN 2.2 MoE + LoRA | ~7 min | Better quality |
+| `--alg` | WAN 2.2 MoE + ALG | ~7 min | Action/dynamic scenes |
+| `--moe` | WAN 2.2 MoE (20 steps) | ~30 min | Maximum quality |
+
+**Note:** WAN 2.2 modes require additional models. Download with: `python scripts/setup_comfyui.py --q6k`
 
 ### angle_transformer.py
 
@@ -383,6 +408,7 @@ python scripts/setup_comfyui.py              # Full setup
 python scripts/setup_comfyui.py --check      # Check status
 python scripts/setup_comfyui.py --start      # Start server
 python scripts/setup_comfyui.py --models     # Download models only
+python scripts/setup_comfyui.py --q6k        # Download WAN 2.2 MoE models (optional)
 ```
 
 ---
@@ -420,8 +446,11 @@ gemini-video-producer-skill/
 │       ├── qwen_pose.json      # Pose-guided generation
 │       ├── qwen_multiangle.json # Camera angle transformation
 │       ├── dwpose_extract.json # Skeleton extraction
-│       ├── wan_i2v.json        # Image-to-Video
-│       └── wan_flf2v.json      # First-Last-Frame-to-Video
+│       ├── wan_i2v.json        # Image-to-Video (WAN 2.1)
+│       ├── wan_flf2v.json      # First-Last-Frame-to-Video
+│       ├── wan_i2v_moe.json    # WAN 2.2 MoE (20 steps)
+│       ├── wan_i2v_moe_fast.json    # WAN 2.2 MoE + LoRA
+│       └── wan_i2v_moe_fast_alg.json # WAN 2.2 MoE + ALG
 ├── comfyui/                    # ComfyUI installation (gitignored)
 │   ├── models/                 # All models stored here
 │   └── output/                 # ComfyUI output directory

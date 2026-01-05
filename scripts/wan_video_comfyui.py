@@ -41,6 +41,8 @@ WORKFLOW_DIR = Path(__file__).parent / "workflows"
 I2V_WORKFLOW = WORKFLOW_DIR / "wan_i2v.json"
 I2V_WORKFLOW_Q6K = WORKFLOW_DIR / "wan_i2v_q6k.json"  # Q6K without LoRA (deprecated)
 I2V_WORKFLOW_MOE = WORKFLOW_DIR / "wan_i2v_moe.json"  # WAN 2.2 MoE (HighNoise + LowNoise)
+I2V_WORKFLOW_MOE_FAST = WORKFLOW_DIR / "wan_i2v_moe_fast.json"  # WAN 2.2 MoE + LightX2V LoRA (8 steps)
+I2V_WORKFLOW_MOE_FAST_ALG = WORKFLOW_DIR / "wan_i2v_moe_fast_alg.json"  # WAN 2.2 MoE + ALG (enhanced motion)
 FLF2V_WORKFLOW = WORKFLOW_DIR / "wan_flf2v.json"
 
 # Resolution presets for different VRAM levels
@@ -331,6 +333,8 @@ def generate_video(
     color_correct: bool = True,
     use_q6k: bool = False,
     use_moe: bool = False,
+    use_moe_fast: bool = False,
+    use_alg: bool = False,
 ) -> str:
     """
     Generate a video using WAN 2.2 with LightX2V distillation via ComfyUI.
@@ -390,7 +394,13 @@ def generate_video(
         print_status("Mode: First-Last-Frame (FLF2V) - 8-step LightX2V")
     elif start_frame:
         mode = "i2v"
-        if use_moe:
+        if use_alg:
+            workflow_file = I2V_WORKFLOW_MOE_FAST_ALG
+            print_status("Mode: Image-to-Video (I2V) - WAN 2.2 MoE + ALG (enhanced motion dynamics)")
+        elif use_moe_fast:
+            workflow_file = I2V_WORKFLOW_MOE_FAST
+            print_status("Mode: Image-to-Video (I2V) - WAN 2.2 MoE + LightX2V LoRA (8 steps, fast)")
+        elif use_moe:
             workflow_file = I2V_WORKFLOW_MOE
             print_status("Mode: Image-to-Video (I2V) - WAN 2.2 MoE (HighNoise + LowNoise, 20 steps)")
         elif use_q6k:
@@ -477,13 +487,17 @@ def generate_video(
     workflow = update_workflow_resolution(workflow, width, height, length)
     workflow = update_workflow_sampler(workflow, steps, cfg, seed)
     
-    # Skip LoRA update for Q6K/MoE modes (no LoRA in workflow)
-    if not use_q6k and not use_moe:
+    # Skip LoRA update for Q6K/MoE modes (no LoRA in workflow or already in workflow)
+    if not use_q6k and not use_moe and not use_moe_fast and not use_alg:
         workflow = update_workflow_lora(workflow, lora_strength)
 
     # Execute workflow
     print_status("Submitting video generation request...", "progress")
-    if use_moe:
+    if use_alg:
+        print_status(f"Settings: {length} frames, 8 steps, CFG 1.0, WAN 2.2 MoE + ALG (enhanced motion)")
+    elif use_moe_fast:
+        print_status(f"Settings: {length} frames, 8 steps, CFG 1.0, WAN 2.2 MoE + LightX2V LoRA (fast)")
+    elif use_moe:
         print_status(f"Settings: {length} frames, 20 steps, CFG 4.0/3.0, WAN 2.2 MoE (HighNoise + LowNoise)")
     elif use_q6k:
         print_status(f"Settings: {length} frames, {steps} steps, CFG {cfg}, WAN 2.2 Q6_K (no LoRA)")
@@ -637,6 +651,16 @@ def main():
         help="Use WAN 2.2 MoE (HighNoise + LowNoise experts, 20 steps, best quality)"
     )
     parser.add_argument(
+        "--moe-fast",
+        action="store_true",
+        help="Use WAN 2.2 MoE + LightX2V LoRA (8 steps, fast generation)"
+    )
+    parser.add_argument(
+        "--alg",
+        action="store_true",
+        help="Use ALG (Adaptive Low-Pass Guidance) for enhanced motion dynamics"
+    )
+    parser.add_argument(
         "--workflow",
         help="Custom workflow JSON file path"
     )
@@ -679,6 +703,8 @@ def main():
         color_correct=not args.no_color_correct,
         use_q6k=args.q6k,
         use_moe=args.moe,
+        use_moe_fast=args.moe_fast,
+        use_alg=args.alg,
     )
 
 

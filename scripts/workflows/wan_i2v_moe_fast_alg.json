@@ -1,0 +1,160 @@
+{
+  "1": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {"title": "Load HighNoise Model"},
+    "inputs": {
+      "unet_name": "Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf"
+    }
+  },
+  "2": {
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {"title": "Load LowNoise Model"},
+    "inputs": {
+      "unet_name": "Wan2.2-I2V-A14B-LowNoise-Q6_K.gguf"
+    }
+  },
+  "1b": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {"title": "LoRA for HighNoise"},
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "2b": {
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {"title": "LoRA for LowNoise"},
+    "inputs": {
+      "model": ["2", 0],
+      "lora_name": "Wan21_I2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "_meta": {"title": "Text Encoder"},
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan"
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "_meta": {"title": "VAE"},
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "Positive Prompt"},
+    "inputs": {
+      "text": "{{PROMPT}}",
+      "clip": ["3", 0]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {"title": "Negative Prompt"},
+    "inputs": {
+      "text": "",
+      "clip": ["3", 0]
+    }
+  },
+  "7": {
+    "class_type": "LoadImage",
+    "_meta": {"title": "Start Frame"},
+    "inputs": {
+      "image": "{{START_FRAME}}"
+    }
+  },
+  "8": {
+    "class_type": "ImageScale",
+    "_meta": {"title": "Scale to Target"},
+    "inputs": {
+      "image": ["7", 0],
+      "upscale_method": "nearest-exact",
+      "width": 832,
+      "height": 480,
+      "crop": "disabled"
+    }
+  },
+  "8a": {
+    "class_type": "ImageScale",
+    "_meta": {"title": "ALG Downsample (remove fine details)"},
+    "inputs": {
+      "image": ["8", 0],
+      "upscale_method": "bilinear",
+      "width": 333,
+      "height": 192,
+      "crop": "disabled"
+    }
+  },
+  "8b": {
+    "class_type": "ImageScale",
+    "_meta": {"title": "ALG Upsample (restore size)"},
+    "inputs": {
+      "image": ["8a", 0],
+      "upscale_method": "bilinear",
+      "width": 832,
+      "height": 480,
+      "crop": "disabled"
+    }
+  },
+  "9": {
+    "class_type": "WanImageToVideo",
+    "_meta": {"title": "I2V Conditioning (with ALG blur)"},
+    "inputs": {
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "vae": ["4", 0],
+      "start_image": ["8b", 0],
+      "width": 832,
+      "height": 480,
+      "length": 81,
+      "batch_size": 1
+    }
+  },
+  "10": {
+    "class_type": "WanMoeKSampler",
+    "_meta": {"title": "MoE KSampler (Fast + ALG)"},
+    "inputs": {
+      "model_high_noise": ["1b", 0],
+      "model_low_noise": ["2b", 0],
+      "boundary": 0.9,
+      "seed": 0,
+      "steps": 8,
+      "cfg_high_noise": 1.0,
+      "cfg_low_noise": 1.0,
+      "sampler_name": "lcm",
+      "scheduler": "sgm_uniform",
+      "sigma_shift": 8.0,
+      "positive": ["9", 0],
+      "negative": ["9", 1],
+      "latent_image": ["9", 2],
+      "denoise": 1.0
+    }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "_meta": {"title": "Decode Video"},
+    "inputs": {
+      "samples": ["10", 0],
+      "vae": ["4", 0]
+    }
+  },
+  "12": {
+    "class_type": "VHS_VideoCombine",
+    "_meta": {"title": "Save Video"},
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "wan_i2v_moe_fast_alg",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true,
+      "images": ["11", 0]
+    }
+  }
+}

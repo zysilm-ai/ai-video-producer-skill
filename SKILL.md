@@ -686,10 +686,60 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
 - Include background context and lighting
 - Match style from philosophy.md
 
-**For Video Prompts:**
-- Describe the MOTION, not static appearance
-- What action happens between start and end keyframes
-- Include camera movement if any
+**For Video Prompts (I2V Motion Prompts):**
+
+I2V (Image-to-Video) models suffer from "suppressed motion dynamics" - they tend to preserve the input image too faithfully, resulting in static or minimal motion videos. This happens because the model "locks onto" fine details in the reference image during early denoising steps.
+
+**CRITICAL RULES for Motion Prompts:**
+
+1. **Separate SUBJECT motion from CAMERA motion** - describe both explicitly
+2. **Describe physical body movements** - "legs pumping", "arms swinging", "torso twisting"
+3. **Include environmental interaction** - "boots splashing through mud", "debris flying past"
+4. **Avoid POV/first-person** - I2V models struggle with perspective-based motion
+5. **Use motion verbs, not state verbs** - "running" not "in motion", "swinging" not "holding"
+
+**BAD Prompt Examples (will produce static video):**
+- ❌ "POV camera moving forward through battlefield" (ambiguous camera vs subject)
+- ❌ "soldier in action" (no specific motion described)
+- ❌ "dynamic scene with explosions" (describes scene, not motion)
+- ❌ "first-person gunfire perspective" (POV is problematic for I2V)
+
+**GOOD Prompt Examples (will produce dynamic video):**
+
+| Scenario | Motion Prompt |
+|----------|---------------|
+| **Running forward** | "soldier physically sprinting forward, legs pumping rapidly, arms swinging rifle, boots kicking up dirt, body leaning into run, camera tracking from behind" |
+| **Combat action** | "warrior swings sword in wide horizontal arc, body rotating with momentum, cape flowing behind movement, enemy staggers backward from impact" |
+| **Walking scene** | "woman walks along beach, each footstep pressing into wet sand, hair flowing in wind, dress rippling with each stride, waves washing past ankles" |
+| **Vehicle motion** | "car accelerates down highway, scenery blurring past windows, suspension bouncing over bumps, wheels spinning faster" |
+| **Dance/Performance** | "dancer spins with arms extended, skirt flaring outward, one leg lifting into pirouette, spotlight following rotation" |
+
+**Motion Prompt Structure:**
+```
+[SUBJECT] [ACTION VERB] [BODY PART DETAILS], [ENVIRONMENTAL INTERACTION], [SECONDARY MOTION], camera [CAMERA MOVEMENT]
+```
+
+**Example applying the structure:**
+```
+soldier sprints through muddy trench,
+legs driving forward with each powerful stride,
+rifle bouncing against chest,
+mud splashing from boots,
+smoke and debris whipping past face,
+camera tracking steadily from behind at shoulder height
+```
+
+**Camera Movement Terms:**
+- "camera tracking from behind" - follows subject from rear
+- "camera dollying alongside" - moves parallel to subject
+- "camera pushing in slowly" - gradual zoom effect
+- "camera holding steady" - static camera, subject moves through frame
+- "camera panning left/right" - rotational movement
+- "camera tilting up/down" - vertical rotation
+
+**References:**
+- [ALG: Enhancing Motion Dynamics of I2V Models](https://arxiv.org/abs/2506.08456)
+- [Wan2.2 Prompt Guide](https://www.instasd.com/post/wan2-2-whats-new-and-how-to-write-killer-prompts)
 
 ### Step 3.3: CHECKPOINT - Get User Approval
 
@@ -1325,6 +1375,46 @@ python {baseDir}/scripts/angle_transformer.py \
 | I2V (Image-to-Video) | `--start-frame` | Continuous motion from single frame |
 | FLF2V (First-Last-Frame) | `--start-frame` + `--end-frame` | Precise control over motion |
 
+### Video Model Selection (IMPORTANT)
+
+**Choose the appropriate model/mode based on scene requirements:**
+
+| Flag | Model | Time | Quality | Motion | When to Use |
+|------|-------|------|---------|--------|-------------|
+| (none) | WAN 2.1 Q4K + LoRA | ~6 min | Good | Standard | Default for most scenes |
+| `--moe-fast` | WAN 2.2 MoE + LoRA | ~7 min | Better | Standard | Higher quality needed |
+| `--alg` | WAN 2.2 MoE + ALG | ~7 min | Good | Enhanced | Action/dynamic scenes |
+| `--moe` | WAN 2.2 MoE (20 steps) | ~30 min | Best | Standard | Maximum quality, time not critical |
+
+**Decision Guide for LLM:**
+
+```
+IF scene requires maximum quality AND time is not critical:
+    USE --moe (20 steps, best quality)
+
+ELSE IF scene has significant action/motion (running, fighting, explosions):
+    USE --alg (enhanced motion dynamics)
+    NOTE: May reduce fidelity to input image
+
+ELSE IF scene needs better quality than default:
+    USE --moe-fast (MoE architecture, 8 steps)
+
+ELSE (standard scenes, talking, slow movement):
+    USE default (no flag) - fastest option
+```
+
+**ALG Trade-offs:**
+- PRO: ~36% improved motion dynamics (less static video)
+- CON: Reduced fidelity to input image (blurs fine details)
+- CON: May shift colors/textures slightly
+- USE WHEN: Motion is more important than exact input reproduction
+
+**Motion Limitations (applies to ALL modes):**
+- I2V models preserve the subject's pose from the input image
+- A static pose in the input = static pose in the video
+- For running/dynamic poses: the starting keyframe must show the subject mid-action
+- Camera motion works better than subject body motion in I2V
+
 ### Technical Specs
 
 | Parameter | Value |
@@ -1338,13 +1428,21 @@ python {baseDir}/scripts/angle_transformer.py \
 
 ### Models Required (ComfyUI + GGUF)
 
-**Video Generation (WAN 2.1):**
+**Video Generation (WAN 2.1 - Default):**
 | Model | Size | Purpose |
 |-------|------|---------|
 | WAN 2.1 I2V Q4_K_M GGUF | ~11GB | Video generation |
 | LightX2V LoRA | ~0.7GB | Fast 8-step generation |
 | UMT5-XXL FP8 | ~5GB | Text encoder |
 | WAN VAE | ~0.2GB | Video decoding |
+
+**Video Generation (WAN 2.2 MoE - Optional, for --moe/--moe-fast/--alg):**
+| Model | Size | Purpose |
+|-------|------|---------|
+| WAN 2.2 I2V HighNoise Q6_K GGUF | ~12GB | MoE high-noise expert |
+| WAN 2.2 I2V LowNoise Q6_K GGUF | ~12GB | MoE low-noise expert |
+
+To download WAN 2.2 models: `python scripts/setup_comfyui.py --q6k`
 
 **Keyframe Generation (Qwen Image Edit 2511):**
 | Model | Size | Purpose |
