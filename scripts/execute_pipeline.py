@@ -35,6 +35,8 @@ from typing import Optional, Dict, Any, List
 
 import cv2
 
+from video_merger import VideoMerger
+
 
 class PipelineExecutor:
     """Executes a pipeline.json file for AI video production."""
@@ -52,10 +54,13 @@ class PipelineExecutor:
         self.scripts_dir = self.base_dir / "scripts"
         self.pipeline = self._load_pipeline()
         self.output_dir = self.pipeline_path.parent  # pipeline.json lives in output dir
+        self.video_merger = VideoMerger()
+        self.pipeline_version = self._detect_version()
 
         print(f"Base dir: {self.base_dir}")
         print(f"Scripts dir: {self.scripts_dir}")
         print(f"Output dir: {self.output_dir}")
+        print(f"Pipeline version: {self.pipeline_version}")
 
     def _load_pipeline(self) -> dict:
         """Load and parse pipeline.json."""
@@ -66,6 +71,56 @@ class PipelineExecutor:
         """Save pipeline.json with updated statuses."""
         with open(self.pipeline_path, 'w', encoding='utf-8') as f:
             json.dump(self.pipeline, f, indent=2, ensure_ascii=False)
+
+    def _detect_version(self) -> str:
+        """
+        Detect pipeline schema version.
+
+        Returns:
+            "3.0" for scene/segment hierarchy
+            "2.0" for video-first flat scenes
+            "1.0" for keyframe-first legacy
+        """
+        version = self.pipeline.get("version", "1.0")
+
+        # Check for v3.0 markers (segments in scenes)
+        scenes = self.pipeline.get("scenes", [])
+        if version == "3.0" or any("segments" in s for s in scenes):
+            return "3.0"
+
+        # Check for v2.0 markers (video-first)
+        if version == "2.0" or "first_keyframe" in self.pipeline:
+            return "2.0"
+
+        # Default to legacy keyframe-first
+        return "1.0"
+
+    def _compute_scene_status(self, scene: dict) -> str:
+        """
+        Compute scene status from segment statuses (hierarchical).
+
+        Args:
+            scene: Scene dict with 'segments' list
+
+        Returns:
+            Computed status string
+        """
+        segments = scene.get("segments", [])
+        if not segments:
+            return scene.get("status", "pending")
+
+        statuses = [s.get("status", "pending") for s in segments]
+
+        if all(s == "approved" for s in statuses):
+            return "approved"
+        elif all(s in ["generated", "approved"] for s in statuses):
+            return "generated"
+        elif any(s == "failed" for s in statuses):
+            return "failed"
+        elif any(s == "in_progress" for s in statuses):
+            return "in_progress"
+        else:
+            return "pending"
 
     def _update_asset_status(self, asset_type: str, item_id: str, status: str):
         """Update status for an asset item."""
@@ -103,6 +158,31 @@ class PipelineExecutor:
                 scene["status"] = status
                 self._save_pipeline()
                 return
+
+    def _update_segment_status(self, scene_id: str, segment_id: str, status: str):
+        """Update status for a segment within a scene (v3.0)."""
+        for scene in self.pipeline.get("scenes", []):
+            if scene["id"] == scene_id:
+                for segment in scene.get("segments", []):
+                    if segment["id"] == segment_id:
+                        segment["status"] = status
+                        self._save_pipeline()
+                        return
+
+    def _update_scene_keyframe_status(self, scene_id: str, status: str):
+        """Update status for a scene's first keyframe (v3.0)."""
+        for scene in self.pipeline.get("scenes", []):
+            if scene["id"] == scene_id:
+                if "first_keyframe" in scene:
+                    scene["first_keyframe"]["status"] = status
+                    self._save_pipeline()
+                return
+
+    def _update_final_video_status(self, status: str):
+        """Update status for final merged video (v3.0)."""
+        if "final_video" in self.pipeline:
+            self.pipeline["final_video"]["status"] = status
+            self._save_pipeline()
 
     def _extract_last_frame(self, video_path: str, output_path: str) -> bool:
         """
@@ -575,6 +655,363 @@ class PipelineExecutor:
 
         print("\n--- Scenes stage complete ---")
 
+    # =========================================================================
+    # V3.0 Scene/Segment Methods
+    # =========================================================================
+
+    def execute_scene_keyframes(self):
+        """
+        Generate starting keyframes for scenes with type='generated' (v3.0).
+
+        Only generates keyframes for scenes where first_keyframe.type == "generated".
+        Scenes with type="extracted" get their keyframe from the previous scene.
+        """
+        print("\n" + "=" * 60)
+        print("STAGE: SCENE KEYFRAMES (v3.0)")
+        print("=" * 60)
+
+        if self.pipeline_version != "3.0":
+            print("  [ERROR] This is not a v3.0 pipeline.")
+            print("  Use --stage first_keyframe for v2.0 pipelines.")
+            return
+
+        scenes = self.pipeline.get("scenes", [])
+        generated_count = 0
+
+        for scene in scenes:
+            scene_id = scene["id"]
+            first_kf = scene.get("first_keyframe", {})
+            kf_type = first_kf.get("type", "generated")
+
+            if kf_type != "generated":
+                print(f"  [skip] {scene_id}: keyframe type is '{kf_type}'")
+                continue
+
+            kf_status = first_kf.get("status", "pending")
+            if kf_status in ["generated", "approved"]:
+                print(f"  [{kf_status}] {scene_id}: keyframe already done")
+                continue
+
+            generated_count += 1
+            output_path = self.output_dir / first_kf["output"]
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Determine keyframe type (character vs landscape)
+            scene_kf_type = first_kf.get("keyframe_type", "character")
+
+            if scene_kf_type == "landscape":
+                cmd = [
+                    sys.executable,
+                    str(self.scripts_dir / "asset_generator.py"),
+                    "background",
+                    "--name", f"{scene_id}_keyframe",
+                    "--description", first_kf["prompt"],
+                    "--output", str(output_path),
+                    "--free-memory"
+                ]
+            else:
+                # Character keyframe
+                cmd = [
+                    sys.executable,
+                    str(self.scripts_dir / "keyframe_generator.py"),
+                    "--free-memory",
+                    "--prompt", first_kf["prompt"],
+                    "--output", str(output_path)
+                ]
+
+                # Add background reference if specified
+                if first_kf.get("background"):
+                    bg_id = first_kf["background"]
+                    bg_data = self.pipeline.get("assets", {}).get("backgrounds", {}).get(bg_id, {})
+                    if bg_data:
+                        bg_path = self.output_dir / bg_data["output"]
+                        cmd.extend(["--background", str(bg_path)])
+
+                # Add character references
+                for char_id in first_kf.get("characters", []):
+                    char_data = self.pipeline.get("assets", {}).get("characters", {}).get(char_id, {})
+                    if char_data:
+                        char_path = self.output_dir / char_data["output"]
+                        cmd.extend(["--character", str(char_path)])
+
+                # Add settings
+                settings = first_kf.get("settings", {})
+                if "preset" in settings:
+                    cmd.extend(["--preset", settings["preset"]])
+
+            print(f"  [pending] {scene_id}: generating keyframe...")
+            if self._run_command(cmd, f"scene keyframe {scene_id}"):
+                self._update_scene_keyframe_status(scene_id, "generated")
+            else:
+                self._update_scene_keyframe_status(scene_id, "failed")
+
+        if generated_count == 0:
+            print("  No keyframes to generate (all extracted or already done)")
+
+        print("\n--- Scene keyframes stage complete ---")
+
+    def execute_scene_segments(
+        self,
+        scene: dict,
+        start_keyframe_path: Path,
+        first_video_in_pipeline: bool = False
+    ) -> Optional[Path]:
+        """
+        Execute all segments within a single scene sequentially (v3.0).
+
+        Args:
+            scene: Scene dict with 'segments' list
+            start_keyframe_path: Path to the starting keyframe
+            first_video_in_pipeline: Whether this is the first video (use --free-memory)
+
+        Returns:
+            Path to the last segment's extracted keyframe, or None if failed
+        """
+        scene_id = scene["id"]
+        segments = scene.get("segments", [])
+
+        if not segments:
+            print(f"    [WARN] Scene {scene_id} has no segments")
+            return None
+
+        keyframe_path = start_keyframe_path
+        first_video = first_video_in_pipeline
+
+        for i, segment in enumerate(segments):
+            seg_id = segment["id"]
+            seg_status = segment.get("status", "pending")
+
+            if seg_status in ["generated", "approved"]:
+                print(f"    [{seg_status}] {seg_id} - skipping")
+                # Update keyframe path from output_keyframe if exists
+                if segment.get("output_keyframe"):
+                    keyframe_path = self.output_dir / segment["output_keyframe"]
+                first_video = False
+                continue
+
+            # Video output
+            video_output = self.output_dir / segment["output_video"]
+            video_output.parent.mkdir(parents=True, exist_ok=True)
+
+            # Build command
+            cmd = [
+                sys.executable,
+                str(self.scripts_dir / "wan_video_comfyui.py"),
+                "--prompt", segment["motion_prompt"],
+                "--start-frame", str(keyframe_path),
+                "--output", str(video_output)
+            ]
+
+            if first_video:
+                cmd.insert(2, "--free-memory")
+                first_video = False
+
+            print(f"    [pending] {seg_id} - generating video...")
+            self._update_segment_status(scene_id, seg_id, "in_progress")
+
+            if not self._run_command(cmd, f"segment {seg_id}"):
+                self._update_segment_status(scene_id, seg_id, "failed")
+                print(f"    [FAIL] Segment {seg_id} failed")
+                return None
+
+            # Extract last frame for next segment
+            if segment.get("output_keyframe"):
+                kf_output = self.output_dir / segment["output_keyframe"]
+                kf_output.parent.mkdir(parents=True, exist_ok=True)
+
+                print(f"    Extracting last frame...")
+                if self._extract_last_frame(str(video_output), str(kf_output)):
+                    keyframe_path = kf_output
+                else:
+                    print(f"    [WARN] Failed to extract keyframe")
+
+            self._update_segment_status(scene_id, seg_id, "generated")
+
+        return keyframe_path
+
+    def _merge_scene_segments(self, scene: dict) -> bool:
+        """
+        Merge all segments within a scene into a single video.
+
+        Args:
+            scene: Scene dict with 'segments' list and 'output_video'
+
+        Returns:
+            True if successful, False otherwise
+        """
+        scene_id = scene["id"]
+        segments = scene.get("segments", [])
+        output_video = scene.get("output_video")
+
+        if not output_video:
+            print(f"    [WARN] Scene {scene_id} has no output_video defined")
+            return False
+
+        output_path = self.output_dir / output_video
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Collect segment video paths
+        video_paths = []
+        for segment in segments:
+            seg_video = self.output_dir / segment["output_video"]
+            if seg_video.exists():
+                video_paths.append(str(seg_video))
+            else:
+                print(f"    [WARN] Segment video not found: {seg_video}")
+
+        if not video_paths:
+            print(f"    [FAIL] No segment videos to merge for {scene_id}")
+            return False
+
+        print(f"    Merging {len(video_paths)} segments into scene video...")
+        return self.video_merger.concatenate(video_paths, str(output_path))
+
+    def execute_scenes_v3(self):
+        """
+        Execute all scenes with segment hierarchy (v3.0).
+
+        For each scene:
+        1. Determine start keyframe (generated or extracted from prev scene)
+        2. Execute all segments sequentially
+        3. Merge segments into scene video
+        4. Extract end keyframe for next scene
+        """
+        print("\n" + "=" * 60)
+        print("STAGE: SCENES (v3.0 - with segments)")
+        print("=" * 60)
+
+        if self.pipeline_version != "3.0":
+            print("  [ERROR] This is not a v3.0 pipeline.")
+            print("  Use --stage scenes for v2.0 pipelines.")
+            return
+
+        scenes = self.pipeline.get("scenes", [])
+        if not scenes:
+            print("  [ERROR] No scenes in pipeline")
+            return
+
+        print(f"\n--- Processing {len(scenes)} scenes ---")
+
+        prev_scene_end_keyframe: Optional[Path] = None
+        first_video_in_pipeline = True
+
+        for scene in scenes:
+            scene_id = scene["id"]
+            scene_status = self._compute_scene_status(scene)
+
+            if scene_status in ["generated", "approved"]:
+                print(f"\n  [{scene_status}] {scene_id} - skipping")
+                # Get last segment's output keyframe for next scene
+                segments = scene.get("segments", [])
+                if segments and segments[-1].get("output_keyframe"):
+                    prev_scene_end_keyframe = self.output_dir / segments[-1]["output_keyframe"]
+                first_video_in_pipeline = False
+                continue
+
+            print(f"\n  [pending] {scene_id} - processing...")
+
+            # Determine start keyframe
+            first_kf = scene.get("first_keyframe", {})
+            kf_type = first_kf.get("type", "generated")
+
+            if kf_type == "generated":
+                kf_output = first_kf.get("output")
+                if not kf_output:
+                    print(f"    [ERROR] No output path for generated keyframe")
+                    continue
+                start_keyframe_path = self.output_dir / kf_output
+            else:  # extracted
+                if prev_scene_end_keyframe is None:
+                    print(f"    [ERROR] No previous keyframe for extracted type")
+                    print("    First scene cannot have type='extracted'")
+                    continue
+                start_keyframe_path = prev_scene_end_keyframe
+
+            if not start_keyframe_path.exists():
+                print(f"    [ERROR] Start keyframe not found: {start_keyframe_path}")
+                continue
+
+            # Execute segments
+            end_keyframe = self.execute_scene_segments(
+                scene,
+                start_keyframe_path,
+                first_video_in_pipeline
+            )
+            first_video_in_pipeline = False
+
+            if end_keyframe is None:
+                print(f"    [FAIL] Scene {scene_id} segment execution failed")
+                continue
+
+            # Merge segments into scene video
+            if len(scene.get("segments", [])) > 1:
+                if not self._merge_scene_segments(scene):
+                    print(f"    [WARN] Scene merge failed")
+            else:
+                # Single segment, just copy/rename
+                single_seg = scene["segments"][0]
+                seg_video = self.output_dir / single_seg["output_video"]
+                scene_video = self.output_dir / scene["output_video"]
+                if seg_video != scene_video:
+                    import shutil
+                    scene_video.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(seg_video, scene_video)
+
+            prev_scene_end_keyframe = end_keyframe
+            print(f"    [OK] Scene {scene_id} complete")
+
+        # Auto-merge final video
+        self.merge_final_video()
+
+        print("\n--- Scenes stage complete ---")
+
+    def merge_final_video(self):
+        """
+        Merge all scene videos with transitions into final output (v3.0).
+        """
+        print("\n--- Merging final video ---")
+
+        if self.pipeline_version != "3.0":
+            print("  [SKIP] Final merge only for v3.0 pipelines")
+            return
+
+        final_config = self.pipeline.get("final_video")
+        if not final_config:
+            print("  [SKIP] No final_video config in pipeline")
+            return
+
+        final_output = self.output_dir / final_config["output"]
+        final_output.parent.mkdir(parents=True, exist_ok=True)
+
+        scenes = self.pipeline.get("scenes", [])
+
+        # Build scene configs for merger
+        scene_configs = []
+        for scene in scenes:
+            scene_video = self.output_dir / scene.get("output_video", "")
+            if not scene_video.exists():
+                print(f"  [WARN] Scene video not found: {scene_video}")
+                continue
+
+            transition = scene.get("transition_from_previous")
+            scene_configs.append({
+                "video": str(scene_video),
+                "transition": transition
+            })
+
+        if not scene_configs:
+            print("  [FAIL] No scene videos to merge")
+            self._update_final_video_status("failed")
+            return
+
+        print(f"  Merging {len(scene_configs)} scenes...")
+        if self.video_merger.merge_all_scenes(scene_configs, str(final_output)):
+            self._update_final_video_status("generated")
+            print(f"  [OK] Final video: {final_output}")
+        else:
+            self._update_final_video_status("failed")
+            print("  [FAIL] Final merge failed")
+
     def regenerate(self, item_id: str):
         """Regenerate a specific item by ID."""
         print(f"\nRegenerating: {item_id}")
@@ -629,10 +1066,7 @@ class PipelineExecutor:
         print("=" * 60)
         print(f"Pipeline file: {self.pipeline_path}")
         print(f"Output dir: {self.output_dir}")
-
-        # Detect mode
-        is_video_first = "first_keyframe" in self.pipeline or "scenes" in self.pipeline
-        print(f"Mode: {'video-first' if is_video_first else 'keyframe-first'}")
+        print(f"Version: {self.pipeline_version}")
         print()
 
         def count_statuses(items: dict | list) -> dict:
@@ -645,7 +1079,8 @@ class PipelineExecutor:
         def status_icon(status: str) -> str:
             return "+" if status == "approved" else \
                    "o" if status == "generated" else \
-                   "x" if status == "failed" else "."
+                   "x" if status == "failed" else \
+                   ">" if status == "in_progress" else "."
 
         # Assets
         print("ASSETS:")
@@ -656,8 +1091,45 @@ class PipelineExecutor:
                 status_str = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
                 print(f"  {section}: {len(items)} items ({status_str})")
 
-        if is_video_first:
-            # Video-first mode
+        if self.pipeline_version == "3.0":
+            # v3.0 scene/segment mode
+            scenes = self.pipeline.get("scenes", [])
+            if scenes:
+                print(f"\nSCENES: {len(scenes)} scenes")
+                for scene in scenes:
+                    scene_id = scene["id"]
+                    scene_status = self._compute_scene_status(scene)
+                    icon = status_icon(scene_status)
+
+                    # Keyframe info
+                    first_kf = scene.get("first_keyframe", {})
+                    kf_type = first_kf.get("type", "generated")
+                    kf_status = first_kf.get("status", "pending") if kf_type == "generated" else "n/a"
+
+                    # Transition info
+                    transition = scene.get("transition_from_previous")
+                    t_str = ""
+                    if transition:
+                        t_type = transition.get("type") if isinstance(transition, dict) else transition
+                        t_str = f" [{t_type}]"
+
+                    print(f"  [{icon}] {scene_id}{t_str} (kf: {kf_type}/{kf_status})")
+
+                    # Show segments
+                    segments = scene.get("segments", [])
+                    for seg in segments:
+                        seg_icon = status_icon(seg.get("status", "pending"))
+                        print(f"      [{seg_icon}] {seg['id']}")
+
+            # Final video status
+            final_video = self.pipeline.get("final_video")
+            if final_video:
+                icon = status_icon(final_video.get("status", "pending"))
+                print(f"\nFINAL VIDEO:")
+                print(f"  [{icon}] {final_video.get('output', 'N/A')}")
+
+        elif self.pipeline_version == "2.0":
+            # v2.0 video-first mode
             first_kf = self.pipeline.get("first_keyframe")
             if first_kf:
                 icon = status_icon(first_kf.get("status", "pending"))
@@ -679,7 +1151,7 @@ class PipelineExecutor:
                         kf_info += f" -> {Path(output_kf).stem}"
                     print(f"  [{icon}] {scene['id']} ({kf_info})")
         else:
-            # Keyframe-first mode (legacy)
+            # v1.0 keyframe-first mode (legacy)
             keyframes = self.pipeline.get("keyframes", [])
             if keyframes:
                 counts = count_statuses(keyframes)
@@ -703,20 +1175,17 @@ class PipelineExecutor:
     def validate(self) -> bool:
         """Validate pipeline structure and references."""
         print("\nValidating pipeline...")
+        print(f"  Detected version: {self.pipeline_version}")
         errors = []
 
         # Check required fields
         if "project_name" not in self.pipeline:
             errors.append("Missing 'project_name'")
 
-        # Detect pipeline mode
-        is_video_first = "first_keyframe" in self.pipeline or "scenes" in self.pipeline
-        is_keyframe_first = "keyframes" in self.pipeline or "videos" in self.pipeline
-
-        if is_video_first and is_keyframe_first:
-            print("  [WARN] Pipeline has both video-first and keyframe-first elements")
-
-        if is_video_first:
+        # Validate based on version
+        if self.pipeline_version == "3.0":
+            errors.extend(self._validate_v3())
+        elif self.pipeline_version == "2.0":
             errors.extend(self._validate_video_first())
         else:
             errors.extend(self._validate_keyframe_first())
@@ -820,6 +1289,88 @@ class PipelineExecutor:
 
         return errors
 
+    def _validate_v3(self) -> List[str]:
+        """Validate v3.0 schema with scene/segment hierarchy."""
+        errors = []
+        valid_transitions = {"cut", "continuous", "fade", "dissolve"}
+
+        scenes = self.pipeline.get("scenes", [])
+        if not scenes:
+            errors.append("Missing 'scenes' in v3.0 pipeline")
+            return errors
+
+        for i, scene in enumerate(scenes):
+            scene_id = scene.get("id", f"scene-{i}")
+
+            # Validate scene structure
+            if "id" not in scene:
+                errors.append(f"Scene {i}: missing 'id'")
+
+            if "output_video" not in scene:
+                errors.append(f"Scene {scene_id}: missing 'output_video'")
+
+            # Validate first_keyframe
+            first_kf = scene.get("first_keyframe", {})
+            kf_type = first_kf.get("type", "generated")
+
+            if kf_type == "generated":
+                if "prompt" not in first_kf:
+                    errors.append(f"Scene {scene_id}: first_keyframe missing 'prompt'")
+                if "output" not in first_kf:
+                    errors.append(f"Scene {scene_id}: first_keyframe missing 'output'")
+
+                # Validate asset references
+                if first_kf.get("background"):
+                    bg_id = first_kf["background"]
+                    if bg_id not in self.pipeline.get("assets", {}).get("backgrounds", {}):
+                        errors.append(f"Scene {scene_id}: background '{bg_id}' not found")
+
+                for char_id in first_kf.get("characters", []):
+                    if char_id not in self.pipeline.get("assets", {}).get("characters", {}):
+                        errors.append(f"Scene {scene_id}: character '{char_id}' not found")
+
+            elif kf_type == "extracted":
+                if i == 0:
+                    errors.append(f"Scene {scene_id}: first scene cannot have type='extracted'")
+            else:
+                errors.append(f"Scene {scene_id}: invalid keyframe type '{kf_type}'")
+
+            # Validate transition
+            transition = scene.get("transition_from_previous")
+            if transition is not None:
+                if i == 0:
+                    errors.append(f"Scene {scene_id}: first scene should not have transition_from_previous")
+                else:
+                    t_type = transition.get("type") if isinstance(transition, dict) else transition
+                    if t_type not in valid_transitions:
+                        errors.append(f"Scene {scene_id}: invalid transition type '{t_type}'")
+
+            # Validate segments
+            segments = scene.get("segments", [])
+            if not segments:
+                errors.append(f"Scene {scene_id}: missing 'segments'")
+            else:
+                for j, segment in enumerate(segments):
+                    seg_id = segment.get("id", f"seg-{j}")
+
+                    if "id" not in segment:
+                        errors.append(f"Scene {scene_id}, segment {j}: missing 'id'")
+                    if "motion_prompt" not in segment:
+                        errors.append(f"Scene {scene_id}, segment {seg_id}: missing 'motion_prompt'")
+                    if "output_video" not in segment:
+                        errors.append(f"Scene {scene_id}, segment {seg_id}: missing 'output_video'")
+
+                    # All segments except last should have output_keyframe
+                    if j < len(segments) - 1 and "output_keyframe" not in segment:
+                        errors.append(f"Scene {scene_id}, segment {seg_id}: missing 'output_keyframe' (required for non-last segments)")
+
+        # Validate final_video if present
+        final_video = self.pipeline.get("final_video")
+        if final_video and "output" not in final_video:
+            errors.append("final_video: missing 'output'")
+
+        return errors
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -827,15 +1378,21 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Keyframe-first mode (legacy):
+  # v1.0 Keyframe-first mode (legacy):
   python execute_pipeline.py pipeline.json --stage assets
   python execute_pipeline.py pipeline.json --stage keyframes
   python execute_pipeline.py pipeline.json --stage videos
   python execute_pipeline.py pipeline.json --all
 
-  # Video-first mode:
+  # v2.0 Video-first mode:
   python execute_pipeline.py pipeline.json --stage assets
   python execute_pipeline.py pipeline.json --stage first_keyframe
+  python execute_pipeline.py pipeline.json --stage scenes
+  python execute_pipeline.py pipeline.json --all
+
+  # v3.0 Scene/Segment mode:
+  python execute_pipeline.py pipeline.json --stage assets
+  python execute_pipeline.py pipeline.json --stage scene_keyframes
   python execute_pipeline.py pipeline.json --stage scenes
   python execute_pipeline.py pipeline.json --all
 
@@ -847,7 +1404,8 @@ Examples:
     )
     parser.add_argument("pipeline", help="Path to pipeline.json")
     parser.add_argument("--stage",
-                       choices=["assets", "keyframes", "videos", "first_keyframe", "scenes"],
+                       choices=["assets", "keyframes", "videos", "first_keyframe",
+                                "scenes", "scene_keyframes"],
                        help="Execute specific stage")
     parser.add_argument("--all", action="store_true",
                        help="Execute all stages sequentially")
@@ -867,9 +1425,7 @@ Examples:
         sys.exit(1)
 
     executor = PipelineExecutor(args.pipeline, args.base_dir)
-
-    # Detect pipeline mode
-    is_video_first = "first_keyframe" in executor.pipeline or "scenes" in executor.pipeline
+    version = executor.pipeline_version
 
     if args.status:
         executor.status()
@@ -881,25 +1437,37 @@ Examples:
     elif args.stage == "assets":
         executor.execute_assets()
     elif args.stage == "keyframes":
-        if is_video_first:
-            print("ERROR: This is a video-first pipeline. Use --stage first_keyframe instead.")
+        if version != "1.0":
+            print(f"ERROR: This is a v{version} pipeline. Use appropriate stage instead.")
             sys.exit(1)
         executor.execute_keyframes()
     elif args.stage == "videos":
-        if is_video_first:
-            print("ERROR: This is a video-first pipeline. Use --stage scenes instead.")
+        if version != "1.0":
+            print(f"ERROR: This is a v{version} pipeline. Use --stage scenes instead.")
             sys.exit(1)
         executor.execute_videos()
     elif args.stage == "first_keyframe":
-        if not is_video_first:
-            print("ERROR: This is a keyframe-first pipeline. Use --stage keyframes instead.")
+        if version != "2.0":
+            print(f"ERROR: This is a v{version} pipeline.")
+            if version == "3.0":
+                print("Use --stage scene_keyframes instead.")
             sys.exit(1)
         executor.execute_first_keyframe()
-    elif args.stage == "scenes":
-        if not is_video_first:
-            print("ERROR: This is a keyframe-first pipeline. Use --stage videos instead.")
+    elif args.stage == "scene_keyframes":
+        if version != "3.0":
+            print(f"ERROR: This is a v{version} pipeline.")
+            if version == "2.0":
+                print("Use --stage first_keyframe instead.")
             sys.exit(1)
-        executor.execute_scenes()
+        executor.execute_scene_keyframes()
+    elif args.stage == "scenes":
+        if version == "1.0":
+            print("ERROR: This is a v1.0 keyframe-first pipeline. Use --stage videos instead.")
+            sys.exit(1)
+        if version == "3.0":
+            executor.execute_scenes_v3()
+        else:
+            executor.execute_scenes()
     elif args.all:
         executor.execute_assets()
         print("\n" + "-" * 60)
@@ -907,8 +1475,17 @@ Examples:
         print("-" * 60)
         input("Press Enter to continue...")
 
-        if is_video_first:
-            # Video-first mode
+        if version == "3.0":
+            # v3.0 scene/segment mode
+            executor.execute_scene_keyframes()
+            print("\n" + "-" * 60)
+            print("Scene keyframes complete. Review before continuing to scenes.")
+            print("-" * 60)
+            input("Press Enter to continue to scenes...")
+
+            executor.execute_scenes_v3()
+        elif version == "2.0":
+            # v2.0 video-first mode
             executor.execute_first_keyframe()
             print("\n" + "-" * 60)
             print("First keyframe complete. Review before continuing to scenes.")
