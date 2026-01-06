@@ -1560,8 +1560,7 @@ python {baseDir}/scripts/angle_transformer.py \
 | Flag | Model | Time | Quality | Motion | When to Use |
 |------|-------|------|---------|--------|-------------|
 | (none) | WAN 2.1 Q4K + LoRA | ~6 min | Good | Standard | Default for most scenes |
-| `--moe-fast` | WAN 2.2 MoE + LoRA | ~7 min | Better | Standard | Higher quality needed |
-| `--alg` | WAN 2.2 MoE + ALG | ~7 min | Good | Enhanced | Action/dynamic scenes |
+| `--moe-fast` | WAN 2.2 MoE + ALG | ~7 min | Better | Enhanced | **RECOMMENDED** - Best balance |
 | `--moe` | WAN 2.2 MoE (20 steps) | ~30 min | Best | Standard | Maximum quality, time not critical |
 
 **Decision Guide for LLM:**
@@ -1570,22 +1569,21 @@ python {baseDir}/scripts/angle_transformer.py \
 IF scene requires maximum quality AND time is not critical:
     USE --moe (20 steps, best quality)
 
-ELSE IF scene has significant action/motion (running, fighting, explosions):
-    USE --alg (enhanced motion dynamics)
-    NOTE: May reduce fidelity to input image
+ELSE (most scenes - RECOMMENDED):
+    USE --moe-fast
+    - Includes ALG for enhanced motion dynamics
+    - Better character consistency
+    - Reduces morphing artifacts
 
-ELSE IF scene needs better quality than default:
-    USE --moe-fast (MoE architecture, 8 steps)
-
-ELSE (standard scenes, talking, slow movement):
+ELSE IF fastest generation needed and motion not critical:
     USE default (no flag) - fastest option
 ```
 
-**ALG Trade-offs:**
+**About ALG (included in --moe-fast):**
 - PRO: ~36% improved motion dynamics (less static video)
-- CON: Reduced fidelity to input image (blurs fine details)
-- CON: May shift colors/textures slightly
-- USE WHEN: Motion is more important than exact input reproduction
+- PRO: Better character consistency during complex motion
+- PRO: Reduces morphing/shape-shifting artifacts
+- NOTE: Slightly reduced input fidelity (intentional - allows more motion freedom)
 
 **Motion Limitations (applies to ALL modes):**
 - I2V models preserve the subject's pose from the input image
@@ -1614,7 +1612,7 @@ ELSE (standard scenes, talking, slow movement):
 | UMT5-XXL FP8 | ~5GB | Text encoder |
 | WAN VAE | ~0.2GB | Video decoding |
 
-**Video Generation (WAN 2.2 MoE - Optional, for --moe/--moe-fast/--alg):**
+**Video Generation (WAN 2.2 MoE - for --moe/--moe-fast):**
 | Model | Size | Purpose |
 |-------|------|---------|
 | WAN 2.2 I2V HighNoise Q6_K GGUF | ~12GB | MoE high-noise expert |

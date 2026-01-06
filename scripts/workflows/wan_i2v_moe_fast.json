@@ -71,7 +71,7 @@
   },
   "8": {
     "class_type": "ImageScale",
-    "_meta": {"title": "Scale Image"},
+    "_meta": {"title": "Scale to Target"},
     "inputs": {
       "image": ["7", 0],
       "upscale_method": "nearest-exact",
@@ -80,14 +80,36 @@
       "crop": "disabled"
     }
   },
+  "8a": {
+    "class_type": "ImageScale",
+    "_meta": {"title": "ALG Downsample (remove fine details)"},
+    "inputs": {
+      "image": ["8", 0],
+      "upscale_method": "bilinear",
+      "width": 333,
+      "height": 192,
+      "crop": "disabled"
+    }
+  },
+  "8b": {
+    "class_type": "ImageScale",
+    "_meta": {"title": "ALG Upsample (restore size)"},
+    "inputs": {
+      "image": ["8a", 0],
+      "upscale_method": "bilinear",
+      "width": 832,
+      "height": 480,
+      "crop": "disabled"
+    }
+  },
   "9": {
     "class_type": "WanImageToVideo",
-    "_meta": {"title": "I2V Conditioning"},
+    "_meta": {"title": "I2V Conditioning (with ALG blur)"},
     "inputs": {
       "positive": ["5", 0],
       "negative": ["6", 0],
       "vae": ["4", 0],
-      "start_image": ["8", 0],
+      "start_image": ["8b", 0],
       "width": 832,
       "height": 480,
       "length": 81,
@@ -96,7 +118,7 @@
   },
   "10": {
     "class_type": "WanMoeKSampler",
-    "_meta": {"title": "MoE KSampler (Fast)"},
+    "_meta": {"title": "MoE KSampler (Fast + ALG)"},
     "inputs": {
       "model_high_noise": ["1b", 0],
       "model_low_noise": ["2b", 0],
@@ -128,7 +150,7 @@
     "inputs": {
       "frame_rate": 16,
       "loop_count": 0,
-      "filename_prefix": "wan_i2v_moe_fast",
+      "filename_prefix": "wan_i2v_moe_fast_alg",
       "format": "video/h264-mp4",
       "pingpong": false,
       "save_output": true,

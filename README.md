@@ -331,8 +331,7 @@ python scripts/wan_video_comfyui.py \
   [--steps 8]                       # Sampling steps
   [--seed 0]                        # Random seed
   [--moe]                           # WAN 2.2 MoE (best quality, slow)
-  [--moe-fast]                      # WAN 2.2 MoE + LoRA (better quality)
-  [--alg]                           # WAN 2.2 MoE + ALG (enhanced motion)
+  [--moe-fast]                      # WAN 2.2 MoE + ALG (RECOMMENDED)
 ```
 
 **Video Modes:**
@@ -347,8 +346,7 @@ python scripts/wan_video_comfyui.py \
 | Flag | Model | Time | Best For |
 |------|-------|------|----------|
 | (none) | WAN 2.1 Q4K + LoRA | ~6 min | Default, fastest |
-| `--moe-fast` | WAN 2.2 MoE + LoRA | ~7 min | Better quality |
-| `--alg` | WAN 2.2 MoE + ALG | ~7 min | Action/dynamic scenes |
+| `--moe-fast` | WAN 2.2 MoE + ALG | ~7 min | **RECOMMENDED** - Best balance |
 | `--moe` | WAN 2.2 MoE (20 steps) | ~30 min | Maximum quality |
 
 **Note:** WAN 2.2 modes require additional models. Download with: `python scripts/setup_comfyui.py --q6k`
@@ -429,8 +427,7 @@ gemini-video-producer-skill/
 │       ├── wan_i2v.json        # Image-to-Video (WAN 2.1)
 │       ├── wan_flf2v.json      # First-Last-Frame-to-Video
 │       ├── wan_i2v_moe.json    # WAN 2.2 MoE (20 steps)
-│       ├── wan_i2v_moe_fast.json    # WAN 2.2 MoE + LoRA
-│       └── wan_i2v_moe_fast_alg.json # WAN 2.2 MoE + ALG
+│       └── wan_i2v_moe_fast.json    # WAN 2.2 MoE + ALG (RECOMMENDED)
 ├── comfyui/                    # ComfyUI installation (gitignored)
 │   ├── models/                 # All models stored here
 │   └── output/                 # ComfyUI output directory
