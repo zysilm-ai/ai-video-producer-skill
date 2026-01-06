@@ -42,13 +42,28 @@ python {baseDir}/scripts/setup_comfyui.py --start # Start server before generati
 **YOU MUST FOLLOW THESE RULES:**
 
 1. **ALWAYS use TodoWrite** at the start to create a task list for the entire workflow
-2. **NEVER skip phases** - complete each phase in order before proceeding
-3. **ALWAYS create required files** - philosophy.md, style.json, scene-breakdown.md, and pipeline.json are REQUIRED
-4. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 5 seconds
-5. **ALWAYS ask user for approval** before proceeding to the next phase
+2. **ALWAYS ask about Approval Mode** at the very start (see below)
+3. **NEVER skip phases** - complete each phase in order before proceeding
+4. **ALWAYS create required files** - philosophy.md, style.json, scene-breakdown.md, and pipeline.json are REQUIRED
+5. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 5 seconds
 6. **NEVER generate without a complete pipeline.json** - plan ALL prompts first, execute second
 7. **ALWAYS use execute_pipeline.py** for generation - deterministic execution, no ad-hoc commands
 8. **ALWAYS review generated outputs using VLM** - view images after each stage, assess quality
+
+## Approval Mode Selection (FIRST STEP)
+
+**At the very beginning of the workflow, ask the user to choose an approval mode:**
+
+Use AskUserQuestion with these options:
+- **"Manual approval"** - User approves each phase before proceeding (philosophy, scenes, pipeline, assets, keyframes, videos)
+- **"Automatic approval"** - LLM proceeds automatically, user only reviews final output
+
+| Mode | User Interaction | Best For |
+|------|------------------|----------|
+| **Manual** | Checkpoint at each phase | First-time projects, precise control, learning the workflow |
+| **Automatic** | Only final review | Trusted workflow, quick generation, batch production |
+
+**Store the selected mode** and apply it to all checkpoints throughout the workflow.
 
 ## Pipeline-Based Architecture
 
@@ -123,33 +138,37 @@ When a scene contains a character (even partially visible, like hands or clothin
 
 ## Standard Checkpoint Format (ALL PHASES)
 
-**Every checkpoint uses the same pattern:**
+**Checkpoint behavior depends on the selected Approval Mode:**
 
+### Manual Approval Mode (default)
 1. Show the output to user (file path or display content)
 2. Ask for approval using AskUserQuestion:
    - **"Approve"** - Proceed to next step
    - User can select **"Other"** to specify what needs to be changed
-
 3. **If user does not approve:**
    - User specifies what to change
-   - Make the requested adjustments (update pipeline.json)
-   - Show updated result
-   - Ask for approval again
-   - **Repeat until approved**
+   - Make the requested adjustments
+   - Show updated result → Ask again → Repeat until approved
+4. **Do NOT proceed to next phase until approved**
 
-4. **Do NOT proceed to next phase until current checkpoint is approved**
+### Automatic Approval Mode
+1. Show the output to user (file path or display content)
+2. **LLM reviews the output using VLM capability** (for images/videos)
+3. If LLM assessment is positive → Proceed automatically
+4. If LLM detects issues → Fix and regenerate before proceeding
+5. **User only reviews final output at the end**
 
 ## Workflow Phases (MUST COMPLETE IN ORDER)
 
-| Phase | LLM Actions | Required Outputs | Checkpoint |
-|-------|-------------|------------------|------------|
-| 1. Production Philosophy | Create visual identity & style | `philosophy.md`, `style.json` | User approval |
-| 2. Scene Breakdown | Plan scenes with segments and transitions | `scene-breakdown.md` | User approval |
-| 3. Pipeline Generation | Generate prompts with v3.0 schema | `pipeline.json` | User approval |
-| 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | LLM reviews with VLM, user approval |
-| 5. Scene Keyframes | Run `execute_pipeline.py --stage scene_keyframes` | `keyframes/scene-*.png` | LLM reviews with VLM, user approval |
-| 6. Scene Execution | Run `execute_pipeline.py --stage scenes` | `scene-*/merged.mp4` + `final/video.mp4` | User approval |
-| 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off |
+| Phase | LLM Actions | Required Outputs | Manual Mode | Auto Mode |
+|-------|-------------|------------------|-------------|-----------|
+| 1. Production Philosophy | Create visual identity & style | `philosophy.md`, `style.json` | User approval | LLM proceeds |
+| 2. Scene Breakdown | Plan scenes with segments and transitions | `scene-breakdown.md` | User approval | LLM proceeds |
+| 3. Pipeline Generation | Generate prompts with v3.0 schema | `pipeline.json` | User approval | LLM proceeds |
+| 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | VLM review + user approval | VLM review + proceed |
+| 5. Scene Keyframes | Run `execute_pipeline.py --stage scene_keyframes` | `keyframes/scene-*.png` | VLM review + user approval | VLM review + proceed |
+| 6. Scene Execution | Run `execute_pipeline.py --stage scenes` | `scene-*/merged.mp4` + `final/video.mp4` | User approval | LLM proceeds |
+| 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off | **User reviews final** |
 
 ---
 
@@ -799,34 +818,42 @@ Before proceeding to video, verify EACH keyframe:
 
 ## TodoWrite Template
 
-At the START of the workflow, create this todo list:
+At the START of the workflow, create the appropriate todo list based on selected approval mode:
 
+### Manual Approval Mode
 ```
-1. Check ComfyUI setup and start server
-2. Create philosophy.md
-3. Create style.json
+1. Ask user to select approval mode (Manual/Automatic)
+2. Check ComfyUI setup and start server
+3. Create philosophy.md and style.json
 4. Get user approval on production philosophy
-5. Create scene-breakdown.md with scenes, segments, and transitions
+5. Create scene-breakdown.md
 6. Get user approval on scene breakdown
-7. Create pipeline.json with v3.0 schema (scenes with segments + final_video)
+7. Create pipeline.json (v3.0 schema)
 8. Get user approval on pipeline.json
-9. Execute asset stage: python execute_pipeline.py pipeline.json --stage assets
-10. Review assets with VLM, get user approval
-11. Execute scene keyframes: python execute_pipeline.py pipeline.json --stage scene_keyframes
-12. Review scene keyframes with VLM, get user approval
-13. Execute scenes: python execute_pipeline.py pipeline.json --stage scenes
-14. Get user approval on scene videos and final merged video
-15. Provide final summary to user
+9. Execute assets stage, review with VLM, get user approval
+10. Execute keyframes stage, review with VLM, get user approval
+11. Execute scenes stage, get user approval
+12. Provide final summary
+```
+
+### Automatic Approval Mode
+```
+1. Ask user to select approval mode (Manual/Automatic)
+2. Check ComfyUI setup and start server
+3. Create philosophy.md and style.json
+4. Create scene-breakdown.md
+5. Create pipeline.json (v3.0 schema)
+6. Execute assets stage, review with VLM
+7. Execute keyframes stage, review with VLM
+8. Execute scenes stage
+9. Present final output to user for review
 ```
 
 **Key points:**
 - ALL prompts are written to pipeline.json BEFORE any generation starts
-- User approves the complete plan before execution
 - execute_pipeline.py handles VRAM management automatically
-- LLM reviews outputs with VLM after each stage
-- Scene keyframes generated for "cut" transitions, extracted for "continuous" (landscape only)
-- Segments within scenes are automatically merged
-- Final video is automatically assembled with transitions
+- LLM always reviews outputs with VLM (both modes)
+- In Auto mode, LLM proceeds unless VLM detects issues
 
 ### Setup Verification (Step 1)
 
