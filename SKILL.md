@@ -166,9 +166,21 @@ Scene 1 (cut)           Scene 2 (continuous)       Scene 3 (fade)
 | Transition | Use When | Keyframe |
 |------------|----------|----------|
 | `cut` | Camera angle/location changes | Generated (new) |
-| `continuous` | Same shot continues | Extracted (from previous scene) |
+| `continuous` | Same shot continues (landscape only) | Extracted (from previous scene) |
 | `fade` | Time skip, dramatic moment | Generated (new) |
 | `dissolve` | Smooth transition between related scenes | Generated (new) |
+
+**CRITICAL: Character Scenes and Continuous Transitions**
+
+When a scene contains a character (even partially visible, like hands or clothing), **do NOT use `"extracted"` keyframes**. Extracted keyframes lose character identity anchoring and cause visual drift (e.g., clothing color changes, style inconsistency).
+
+| Scene Type | Transition | Keyframe Type | Why |
+|------------|------------|---------------|-----|
+| Landscape (no characters) | `continuous` | `extracted` | OK - no character identity to preserve |
+| Character visible | `continuous` | `generated` | REQUIRED - re-anchor character identity |
+| Character visible | `cut` | `generated` | Standard - new camera angle |
+
+**Rule:** If ANY part of a character is visible (hands, clothing, body), use `"type": "generated"` with character references.
 
 ## Pipeline Mode Selection (REQUIRED - Ask First)
 
@@ -794,16 +806,25 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
 
 | Field | Description |
 |-------|-------------|
-| `scenes[].first_keyframe.type` | `"generated"` = create new keyframe, `"extracted"` = use previous scene's end |
+| `scenes[].first_keyframe.type` | `"generated"` = create new keyframe with character refs, `"extracted"` = use previous scene's end (landscape only!) |
+| `scenes[].first_keyframe.characters` | Array of character IDs to reference - **REQUIRED if character is visible** |
 | `scenes[].transition_from_previous` | `null` for first scene, or `{"type": "cut/continuous/fade/dissolve"}` |
 | `scenes[].segments[]` | Array of 5-second video chunks within the scene |
 | `segments[].output_keyframe` | Extracted last frame (required for all but last segment) |
 | `scenes[].output_video` | Merged video of all segments in this scene |
 | `final_video` | All scene videos merged with transitions |
 
+**Keyframe Type Selection (CRITICAL for consistency):**
+
+| Scene Content | `first_keyframe.type` | `characters` array | Notes |
+|---------------|----------------------|-------------------|-------|
+| Character fully visible | `"generated"` | Required | Include all visible characters |
+| Character partially visible (hands, clothing) | `"generated"` | Required | Include character for clothing/style consistency |
+| Landscape only (no characters) | `"generated"` or `"extracted"` | Optional | Can use extracted for continuous transitions |
+
 **Transition Types:**
 - `cut`: Hard cut (instant switch between scenes)
-- `continuous`: Seamless continuation (keyframe extracted from previous scene)
+- `continuous`: Seamless continuation - use `"extracted"` ONLY for landscape scenes, use `"generated"` with character refs for character scenes
 - `fade`: Fade through black (duration configurable, default 0.5s)
 - `dissolve`: Cross-dissolve (duration configurable, default 0.5s)
 
@@ -1049,6 +1070,70 @@ Keyframe generation uses different flows based on scene type from `scene-breakdo
 | **Character Identity** | ALWAYS use original asset from `assets/characters/` (never chain) |
 | **Background** | Chain from previous scene's background for continuity |
 | **Style** | ALWAYS apply with style asset reference |
+
+### Character Consistency Rules (CRITICAL)
+
+**Problem:** Without character references, I2V models cause "identity drift" - clothing colors change, styles shift, and characters become unrecognizable across scenes.
+
+**Solution:** Include character references for ANY scene where the character is visible, even partially.
+
+**When to include character references:**
+
+| What's Visible | Include Character Reference? | Example |
+|----------------|------------------------------|---------|
+| Full body | YES | Wide shot of character walking |
+| Upper body only | YES | Medium shot conversation |
+| Hands only | YES | Close-up of hands holding object |
+| Clothing only (no face) | YES | Back view of character running |
+| Character's belongings | Optional | Close-up of character's bag |
+| No character elements | NO | Landscape, building exterior |
+
+**Common Mistakes to Avoid:**
+
+1. **Close-up shots without character reference:**
+   ```json
+   // WRONG - hands visible but no character reference
+   "first_keyframe": {
+     "type": "generated",
+     "prompt": "Close-up of hands holding cake...",
+     "characters": []  // Missing!
+   }
+
+   // CORRECT - include character for clothing consistency
+   "first_keyframe": {
+     "type": "generated",
+     "prompt": "Close-up of hands in grey hoodie holding cake...",
+     "characters": ["protagonist"]  // Anchors clothing style
+   }
+   ```
+
+2. **Continuous transitions with characters:**
+   ```json
+   // WRONG - extracted keyframe loses character identity
+   "first_keyframe": {
+     "type": "extracted"  // Character will drift!
+   }
+
+   // CORRECT - generated keyframe re-anchors identity
+   "first_keyframe": {
+     "type": "generated",
+     "prompt": "Character running away...",
+     "characters": ["protagonist"],
+     "background": "train_station"
+   }
+   ```
+
+**The Character Drift Problem:**
+
+When keyframes are "extracted" from video end frames or generated without character references:
+- Scene 1 → Scene 2 → Scene 3 → Scene 4
+- Each scene accumulates small deviations
+- By Scene 4, character may be unrecognizable (different clothing color, style)
+
+**The Solution - Re-anchor at every character scene:**
+- Always use `"type": "generated"` for scenes with characters
+- Always include the character in the `"characters"` array
+- Use the original asset from `assets/characters/` (never chain from previous keyframes)
 
 ### Step 3.1: Set Up Directory Structure
 
