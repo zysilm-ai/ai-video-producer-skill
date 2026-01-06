@@ -106,9 +106,9 @@ The server must be running at `http://127.0.0.1:8188` for generation scripts to 
 
 ## Pipeline Modes
 
-The pipeline supports two execution modes:
+The pipeline supports three execution modes:
 
-### Keyframe-First Mode (Default)
+### v1.0 Keyframe-First Mode (Legacy)
 Generate all keyframes first, then generate videos between keyframe pairs (FLF2V mode).
 
 ```
@@ -120,7 +120,7 @@ KF-B ─────────────→ Scene 2 ←───────
 **Pros:** Precise control over start and end frames
 **Cons:** Each keyframe generated independently can cause background inconsistency
 
-### Video-First Mode (Recommended for continuity)
+### v2.0 Video-First Mode
 Generate only the first keyframe, then generate videos sequentially using I2V mode.
 Each video's last frame becomes the next scene's start keyframe.
 
@@ -131,15 +131,55 @@ KF-A (generated) → Scene 1 → KF-B (extracted) → Scene 2 → KF-C (extracte
 **Pros:** Perfect visual continuity between scenes (same camera, lighting, position)
 **Cons:** Less control over specific end frame composition
 
+### v3.0 Scene/Segment Mode (Recommended)
+Proper hierarchical structure distinguishing **Scenes** (narrative/cinematographic units) from **Segments** (5-second technical chunks).
+
+**Key Concepts:**
+- **Scene**: A continuous shot from a single camera perspective (e.g., "woman at cafe table", "phone screen close-up")
+- **Segment**: A 5-second video chunk within a scene (due to model limitations)
+- **Transition**: How scenes connect ("cut", "continuous", "fade", "dissolve")
+
+```
+Scene 1 (cut)           Scene 2 (continuous)       Scene 3 (fade)
+┌─────────────────┐     ┌─────────────────┐       ┌─────────────────┐
+│ KF (generated)  │     │ KF (extracted)  │       │ KF (generated)  │
+│ ┌─────────────┐ │     │ ┌─────────────┐ │       │ ┌─────────────┐ │
+│ │ Segment A   │ │     │ │ Segment A   │ │       │ │ Segment A   │ │
+│ └─────────────┘ │     │ └─────────────┘ │       │ └─────────────┘ │
+│ ┌─────────────┐ │     └─────────────────┘       └─────────────────┘
+│ │ Segment B   │ │             │                         │
+│ └─────────────┘ │             │ continuous              │ fade
+└─────────────────┘             ▼                         ▼
+        │ cut          ─────────────────          ─────────────────
+        ▼              Final merged video with transitions
+```
+
+**Pros:**
+- Semantic clarity (scenes = narrative units, segments = technical units)
+- Scene-level keyframes (generated for cuts, extracted for continuous)
+- Automatic video merging with transitions (cut, fade, dissolve)
+- Hierarchical status tracking
+
+**Cons:** More complex schema
+
+**When to use each transition:**
+| Transition | Use When | Keyframe |
+|------------|----------|----------|
+| `cut` | Camera angle/location changes | Generated (new) |
+| `continuous` | Same shot continues | Extracted (from previous scene) |
+| `fade` | Time skip, dramatic moment | Generated (new) |
+| `dissolve` | Smooth transition between related scenes | Generated (new) |
+
 ## Pipeline Mode Selection (REQUIRED - Ask First)
 
 **Before starting any work, ask the user which pipeline mode to use:**
 
 Use AskUserQuestion with these options:
-- **"Video-First (Recommended)"** - Best for visual continuity. Only first keyframe is generated; subsequent keyframes are extracted from video last frames.
-- **"Keyframe-First"** - Best when you need precise control over specific end frame composition. All keyframes generated independently.
+- **"Scene/Segment v3.0 (Recommended)"** - Best for longer videos with multiple scenes. Proper scene/segment hierarchy with automatic merging and transitions.
+- **"Video-First v2.0"** - Simple sequential scenes. Best for short videos where all scenes are continuous.
+- **"Keyframe-First v1.0"** - Legacy mode when you need precise control over specific end frame composition.
 
-**Default recommendation:** Video-First solves background inconsistency issues between scenes.
+**Default recommendation:** Scene/Segment v3.0 for most use cases.
 
 ## Standard Checkpoint Format (ALL PHASES)
 
@@ -174,7 +214,7 @@ Use AskUserQuestion with these options:
 | 6. Video Execution | Run `execute_pipeline.py --stage videos` | `scene-*/video.mp4` | User approval |
 | 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off |
 
-### Video-First Mode (Recommended)
+### Video-First Mode (v2.0)
 
 | Phase | LLM Actions | Required Outputs | Checkpoint |
 |-------|-------------|------------------|------------|
@@ -185,6 +225,19 @@ Use AskUserQuestion with these options:
 | 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | LLM reviews with VLM, user approval |
 | 5. First Keyframe | Run `execute_pipeline.py --stage first_keyframe` | `keyframes/KF-A.png` | LLM reviews with VLM, user approval |
 | 6. Scene Execution | Run `execute_pipeline.py --stage scenes` | `scene-*/video.mp4` + extracted keyframes | User approval |
+| 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off |
+
+### Scene/Segment Mode (v3.0 - Recommended)
+
+| Phase | LLM Actions | Required Outputs | Checkpoint |
+|-------|-------------|------------------|------------|
+| 0. Mode Selection | Ask user which pipeline mode | User's choice | **Ask before starting** |
+| 1. Production Philosophy | Create visual identity & style | `philosophy.md`, `style.json` | User approval |
+| 2. Scene Breakdown | Plan scenes with segments and transitions | `scene-breakdown.md` | User approval |
+| 3. Pipeline Generation | Generate prompts with v3.0 schema | `pipeline.json` | User approval |
+| 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | LLM reviews with VLM, user approval |
+| 5. Scene Keyframes | Run `execute_pipeline.py --stage scene_keyframes` | `keyframes/scene-*.png` | LLM reviews with VLM, user approval |
+| 6. Scene Execution | Run `execute_pipeline.py --stage scenes` | `scene-*/merged.mp4` + `final/video.mp4` | User approval |
 | 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off |
 
 ---
@@ -604,6 +657,155 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
 - `motion_prompt`: Describes what happens during the scene (no end frame)
 - `output_keyframe`: Where to save the extracted last frame (becomes next scene's start)
 - `start_keyframe`: References either `first_keyframe.id` or previous scene's extracted keyframe
+
+#### Scene/Segment Schema v3.0 (Recommended)
+
+```json
+{
+  "version": "3.0",
+  "project_name": "project-name",
+
+  "metadata": {
+    "created_at": "ISO timestamp",
+    "philosophy_file": "philosophy.md",
+    "style_file": "style.json",
+    "scene_breakdown_file": "scene-breakdown.md"
+  },
+
+  "assets": {
+    "characters": {
+      "cafe_woman": {
+        "prompt": "Character description...",
+        "output": "assets/characters/cafe_woman.png",
+        "status": "pending"
+      }
+    },
+    "backgrounds": {
+      "cafe_interior": {
+        "prompt": "Background description...",
+        "output": "assets/backgrounds/cafe_interior.png",
+        "status": "pending"
+      }
+    }
+  },
+
+  "scenes": [
+    {
+      "id": "scene-01",
+      "description": "Woman notices phone notification",
+      "camera": "medium close-up",
+
+      "transition_from_previous": null,
+
+      "first_keyframe": {
+        "type": "generated",
+        "prompt": "Detailed keyframe description...",
+        "background": "cafe_interior",
+        "characters": ["cafe_woman"],
+        "output": "keyframes/scene-01-start.png",
+        "status": "pending"
+      },
+
+      "segments": [
+        {
+          "id": "seg-01-a",
+          "motion_prompt": "Woman sighs, reaches for phone...",
+          "output_video": "scene-01/seg-a.mp4",
+          "output_keyframe": "keyframes/scene-01-seg-a-end.png",
+          "status": "pending"
+        },
+        {
+          "id": "seg-01-b",
+          "motion_prompt": "Woman picks up phone, reads message...",
+          "output_video": "scene-01/seg-b.mp4",
+          "output_keyframe": "keyframes/scene-01-seg-b-end.png",
+          "status": "pending"
+        }
+      ],
+
+      "output_video": "scene-01/merged.mp4",
+      "status": "pending"
+    },
+    {
+      "id": "scene-02",
+      "description": "Phone screen close-up",
+      "camera": "extreme close-up",
+
+      "transition_from_previous": {
+        "type": "cut"
+      },
+
+      "first_keyframe": {
+        "type": "generated",
+        "prompt": "Extreme close-up of smartphone screen...",
+        "output": "keyframes/scene-02-start.png",
+        "status": "pending"
+      },
+
+      "segments": [
+        {
+          "id": "seg-02-a",
+          "motion_prompt": "Message notification appears on screen...",
+          "output_video": "scene-02/seg-a.mp4",
+          "output_keyframe": "keyframes/scene-02-seg-a-end.png",
+          "status": "pending"
+        }
+      ],
+
+      "output_video": "scene-02/merged.mp4",
+      "status": "pending"
+    },
+    {
+      "id": "scene-03",
+      "description": "Woman's reaction (continuous from scene-02)",
+      "camera": "medium close-up",
+
+      "transition_from_previous": {
+        "type": "continuous"
+      },
+
+      "first_keyframe": {
+        "type": "extracted"
+      },
+
+      "segments": [
+        {
+          "id": "seg-03-a",
+          "motion_prompt": "Woman's expression changes to shock...",
+          "output_video": "scene-03/seg-a.mp4",
+          "output_keyframe": "keyframes/scene-03-seg-a-end.png",
+          "status": "pending"
+        }
+      ],
+
+      "output_video": "scene-03/merged.mp4",
+      "status": "pending"
+    }
+  ],
+
+  "final_video": {
+    "output": "final/video.mp4",
+    "status": "pending"
+  }
+}
+```
+
+**v3.0 Schema Key Concepts:**
+
+| Field | Description |
+|-------|-------------|
+| `scenes[].first_keyframe.type` | `"generated"` = create new keyframe, `"extracted"` = use previous scene's end |
+| `scenes[].transition_from_previous` | `null` for first scene, or `{"type": "cut/continuous/fade/dissolve"}` |
+| `scenes[].segments[]` | Array of 5-second video chunks within the scene |
+| `segments[].output_keyframe` | Extracted last frame (required for all but last segment) |
+| `scenes[].output_video` | Merged video of all segments in this scene |
+| `final_video` | All scene videos merged with transitions |
+
+**Transition Types:**
+- `cut`: Hard cut (instant switch between scenes)
+- `continuous`: Seamless continuation (keyframe extracted from previous scene)
+- `fade`: Fade through black (duration configurable, default 0.5s)
+- `dissolve`: Cross-dissolve (duration configurable, default 0.5s)
 
 ### Step 3.2: Pipeline Prompt Writing Guidelines
 
@@ -1152,7 +1354,7 @@ At the START of the workflow, create this todo list based on your pipeline mode:
 16. Provide final summary to user
 ```
 
-### Video-First Mode (Recommended)
+### Video-First Mode (v2.0)
 
 ```
 1. Ask user: Video-First or Keyframe-First? (user chose Video-First)
@@ -1173,12 +1375,35 @@ At the START of the workflow, create this todo list based on your pipeline mode:
 16. Provide final summary to user
 ```
 
+### Scene/Segment Mode (v3.0 - Recommended)
+
+```
+1. Ask user: Scene/Segment v3.0, Video-First v2.0, or Keyframe-First v1.0? (user chose v3.0)
+2. Check ComfyUI setup and start server
+3. Create philosophy.md
+4. Create style.json
+5. Get user approval on production philosophy
+6. Create scene-breakdown.md with scenes, segments, and transitions
+7. Get user approval on scene breakdown
+8. Create pipeline.json with v3.0 schema (scenes with segments + final_video)
+9. Get user approval on pipeline.json
+10. Execute asset stage: python execute_pipeline.py pipeline.json --stage assets
+11. Review assets with VLM, get user approval
+12. Execute scene keyframes: python execute_pipeline.py pipeline.json --stage scene_keyframes
+13. Review scene keyframes with VLM, get user approval
+14. Execute scenes: python execute_pipeline.py pipeline.json --stage scenes
+15. Get user approval on scene videos and final merged video
+16. Provide final summary to user
+```
+
 **Key points:**
 - ALL prompts are written to pipeline.json BEFORE any generation starts
 - User approves the complete plan before execution
 - execute_pipeline.py handles VRAM management automatically
 - LLM reviews outputs with VLM after each stage
-- Video-first mode extracts last frames automatically for scene continuity
+- v3.0 mode generates scene keyframes for "cut" transitions, extracts for "continuous"
+- Segments within scenes are automatically merged
+- Final video is automatically assembled with transitions
 
 ### Auto-Setup Check (Step 1)
 
@@ -1248,16 +1473,22 @@ python wan_video_comfyui.py --prompt "..." --start-frame keyframes/KF-B.png --en
 | `keyframe_generator.py` | Generate keyframes with character references | `--prompt`, `--character`, `--background`, `--output` |
 | `angle_transformer.py` | Transform keyframe camera angles | `--input`, `--output`, `--rotate`, `--tilt`, `--zoom` |
 | `wan_video_comfyui.py` | Generate videos (WAN 2.1) | `--prompt`, `--start-frame`, `--end-frame`, `--output`, `--free-memory` |
+| `video_merger.py` | Merge videos with transitions | `--concat`, `--output`, `--transition`, `--duration` |
 | `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
 
 ### Pipeline Execution
 
-| Stage | Keyframe-First | Video-First |
-|-------|----------------|-------------|
-| Assets | `--stage assets` | `--stage assets` |
-| Keyframes | `--stage keyframes` | `--stage first_keyframe` |
-| Videos | `--stage videos` | `--stage scenes` |
-| All stages | `--all` | `--all` |
+| Stage | v1.0 Keyframe-First | v2.0 Video-First | v3.0 Scene/Segment |
+|-------|---------------------|------------------|-------------------|
+| Assets | `--stage assets` | `--stage assets` | `--stage assets` |
+| Keyframes | `--stage keyframes` | `--stage first_keyframe` | `--stage scene_keyframes` |
+| Videos | `--stage videos` | `--stage scenes` | `--stage scenes` |
+| All stages | `--all` | `--all` | `--all` |
+
+**v3.0 Key Features:**
+- Scene keyframes generated for "cut" transitions, extracted for "continuous"
+- Segments within scenes merged automatically
+- Final video assembled with transitions (cut/fade/dissolve)
 
 **Remember:** Use `--free-memory` when switching between image and video generation!
 
