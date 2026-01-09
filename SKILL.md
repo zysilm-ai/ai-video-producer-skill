@@ -1,433 +1,156 @@
 ---
 name: ai-video-producer
 description: >
-  Complete AI video production workflow using WAN 2.1 and Qwen Image Edit 2511 models via ComfyUI.
-  Creates any video type: promotional, educational, narrative, social media,
-  animations, game trailers, music videos, product demos, and more. Use when
-  users want to create videos with AI, need help with video storyboarding,
-  keyframe generation, or video prompt writing. Follows a philosophy-first
-  approach: establish visual style and production philosophy, then execute
-  scene by scene with user feedback at each stage. Supports advanced features
-  like layer-based compositing, reference-based generation, and style
-  consistency. Runs locally on RTX 3080+ (10GB+ VRAM).
+  AI video production using WAN 2.1 and Qwen Image Edit via ComfyUI.
+  Creates any video type: promotional, narrative, educational, animations, etc.
+  Follows philosophy-first approach with scene-by-scene execution.
+  Runs locally on RTX 3080+ (10GB+ VRAM).
 allowed-tools: Bash, Read, Write, Edit, Glob, AskUserQuestion, TodoWrite
 ---
 
 # AI Video Producer
 
-Create professional AI-generated videos through a structured, iterative workflow using local models.
+## Setup
 
-## Prerequisites & Auto-Setup
-
-**Requires:** WAN 2.1 + Qwen Image Edit via ComfyUI (GGUF quantization, ~40GB models)
-
-### Setup Commands
 ```bash
 python {baseDir}/scripts/setup_comfyui.py         # Full setup (first time)
-python {baseDir}/scripts/setup_comfyui.py --check # Verify setup
-python {baseDir}/scripts/setup_comfyui.py --start # Start server before generating
+python {baseDir}/scripts/setup_comfyui.py --check # Verify
+python {baseDir}/scripts/setup_comfyui.py --start # Start server
 ```
 
-### System Requirements
-| Component | Minimum |
-|-----------|---------|
-| GPU VRAM | 10GB |
-| RAM | 16GB |
-| Storage | 40GB free |
+**Requirements:** 10GB VRAM, 16GB RAM, 40GB storage
 
-**See `README.md` for detailed setup instructions.**
+## Mandatory Rules
 
-## MANDATORY WORKFLOW REQUIREMENTS
+1. **Use TodoWrite** at start to track workflow
+2. **Ask Approval Mode** first (Manual or Automatic)
+3. **Never skip phases** - complete in order
+4. **Create all required files** before generation
+5. **Use execute_pipeline.py** for all generation
 
-**YOU MUST FOLLOW THESE RULES:**
+## Workflow Overview
 
-1. **ALWAYS use TodoWrite** at the start to create a task list for the entire workflow
-2. **ALWAYS ask about Approval Mode** at the very start (see below)
-3. **NEVER skip phases** - complete each phase in order before proceeding
-4. **ALWAYS create required files** - philosophy.md, style.json, scene-breakdown.md, and pipeline.json are REQUIRED
-5. **ALWAYS break videos into multiple scenes** - minimum 2 scenes for any video over 5 seconds
-6. **NEVER generate without a complete pipeline.json** - plan ALL prompts first, execute second
-7. **ALWAYS use execute_pipeline.py** for generation - deterministic execution, no ad-hoc commands
-8. **ALWAYS review generated outputs using VLM** - view images after each stage, assess quality
+| Phase | Output | Approval |
+|-------|--------|----------|
+| 1. Philosophy | `philosophy.md`, `style.json` | Checkpoint |
+| 2. Scene Breakdown | `scene-breakdown.md` | Checkpoint |
+| 3. Pipeline | `pipeline.json` | Checkpoint |
+| 4. Assets | `assets/` | VLM review |
+| 5. Keyframes | `keyframes/` | VLM review |
+| 6. Videos | `scene-*/`, `final/` | Final review |
 
-## Approval Mode Selection (FIRST STEP)
-
-**At the very beginning of the workflow, ask the user to choose an approval mode:**
-
-Use AskUserQuestion with these options:
-- **"Manual approval"** - User approves each phase before proceeding (philosophy, scenes, pipeline, assets, keyframes, videos)
-- **"Automatic approval"** - LLM proceeds automatically, user only reviews final output
-
-| Mode | User Interaction | Best For |
-|------|------------------|----------|
-| **Manual** | Checkpoint at each phase | First-time projects, precise control, learning the workflow |
-| **Automatic** | Only final review | Trusted workflow, quick generation, batch production |
-
-**Store the selected mode** and apply it to all checkpoints throughout the workflow.
-
-## Pipeline-Based Architecture
-
-**This skill uses a two-phase approach:**
-
-### Phase A: Planning (LLM-Driven)
-- LLM creates philosophy.md, style.json, scene-breakdown.md
-- LLM generates ALL prompts and stores in `pipeline.json`
-- User reviews and approves the complete plan before any generation
-
-### Phase B: Execution (Programmatic)
-- `execute_pipeline.py` reads pipeline.json and executes deterministically
-- LLM reviews outputs using VLM capability after each stage
-- User approves or requests regeneration
-
-**Benefits:**
-- All prompts visible before ANY generation starts
-- Deterministic execution - no LLM deviation during generation
-- Reproducible - same pipeline.json = same commands executed
-- Traceable - status tracking in pipeline.json
-
-## Pipeline Mode: Scene/Segment v3.0
-Proper hierarchical structure distinguishing **Scenes** (narrative/cinematographic units) from **Segments** (5-second technical chunks).
-
-**Key Concepts:**
-- **Scene**: A continuous shot from a single camera perspective (e.g., "woman at cafe table", "phone screen close-up")
-- **Segment**: A 5-second video chunk within a scene (due to model limitations)
-- **Transition**: How scenes connect ("cut", "continuous", "fade", "dissolve")
-
-```
-Scene 1 (cut)           Scene 2 (continuous)       Scene 3 (fade)
-┌─────────────────┐     ┌─────────────────┐       ┌─────────────────┐
-│ KF (generated)  │     │ KF (extracted)  │       │ KF (generated)  │
-│ ┌─────────────┐ │     │ ┌─────────────┐ │       │ ┌─────────────┐ │
-│ │ Segment A   │ │     │ │ Segment A   │ │       │ │ Segment A   │ │
-│ └─────────────┘ │     │ └─────────────┘ │       │ └─────────────┘ │
-│ ┌─────────────┐ │     └─────────────────┘       └─────────────────┘
-│ │ Segment B   │ │             │                         │
-│ └─────────────┘ │             │ continuous              │ fade
-└─────────────────┘             ▼                         ▼
-        │ cut          ─────────────────          ─────────────────
-        ▼              Final merged video with transitions
-```
-
-**Pros:**
-- Semantic clarity (scenes = narrative units, segments = technical units)
-- Scene-level keyframes (generated for cuts, extracted for continuous)
-- Automatic video merging with transitions (cut, fade, dissolve)
-- Hierarchical status tracking
-
-**Cons:** More complex schema
-
-**When to use each transition:**
-| Transition | Use When | Keyframe |
-|------------|----------|----------|
-| `cut` | Camera angle/location changes | Generated (new) |
-| `continuous` | Same shot continues (landscape only) | Extracted (from previous scene) |
-| `fade` | Time skip, dramatic moment | Generated (new) |
-| `dissolve` | Smooth transition between related scenes | Generated (new) |
-
-**CRITICAL: Character Scenes and Continuous Transitions**
-
-When a scene contains a character (even partially visible, like hands or clothing), **do NOT use `"extracted"` keyframes**. Extracted keyframes lose character identity anchoring and cause visual drift (e.g., clothing color changes, style inconsistency).
-
-| Scene Type | Transition | Keyframe Type | Why |
-|------------|------------|---------------|-----|
-| Landscape (no characters) | `continuous` | `extracted` | OK - no character identity to preserve |
-| Character visible | `continuous` | `generated` | REQUIRED - re-anchor character identity |
-| Character visible | `cut` | `generated` | Standard - new camera angle |
-
-**Rule:** If ANY part of a character is visible (hands, clothing, body), use `"type": "generated"` with character references.
-
-## Standard Checkpoint Format (ALL PHASES)
-
-**Checkpoint behavior depends on the selected Approval Mode:**
-
-### Manual Approval Mode (default)
-1. Show the output to user (file path or display content)
-2. Ask for approval using AskUserQuestion:
-   - **"Approve"** - Proceed to next step
-   - User can select **"Other"** to specify what needs to be changed
-3. **If user does not approve:**
-   - User specifies what to change
-   - Make the requested adjustments
-   - Show updated result → Ask again → Repeat until approved
-4. **Do NOT proceed to next phase until approved**
-
-### Automatic Approval Mode
-1. Show the output to user (file path or display content)
-2. **LLM reviews the output using VLM capability** (for images/videos)
-3. If LLM assessment is positive → Proceed automatically
-4. If LLM detects issues → Fix and regenerate before proceeding
-5. **User only reviews final output at the end**
-
-## Workflow Phases (MUST COMPLETE IN ORDER)
-
-| Phase | LLM Actions | Required Outputs | Manual Mode | Auto Mode |
-|-------|-------------|------------------|-------------|-----------|
-| 1. Production Philosophy | Create visual identity & style | `philosophy.md`, `style.json` | User approval | LLM proceeds |
-| 2. Scene Breakdown | Plan scenes with segments and transitions | `scene-breakdown.md` | User approval | LLM proceeds |
-| 3. Pipeline Generation | Generate prompts with v3.0 schema | `pipeline.json` | User approval | LLM proceeds |
-| 4. Asset Execution | Run `execute_pipeline.py --stage assets` | `assets/` folder | VLM review + user approval | VLM review + proceed |
-| 5. Scene Keyframes | Run `execute_pipeline.py --stage scene_keyframes` | `keyframes/scene-*.png` | VLM review + user approval | VLM review + proceed |
-| 6. Scene Execution | Run `execute_pipeline.py --stage scenes` | `scene-*/merged.mp4` + `final/video.mp4` | User approval | LLM proceeds |
-| 7. Review & Iterate | Handle regeneration requests | Refinements | User signs off | **User reviews final** |
+**Approval Modes:**
+- **Manual**: User approves each phase
+- **Automatic**: LLM proceeds, user reviews final only
 
 ---
 
-## Phase 1: Production Philosophy (REQUIRED)
+## Phase 1: Production Philosophy
 
-**DO NOT PROCEED TO PHASE 2 UNTIL BOTH FILES EXIST:**
-- `{output_dir}/philosophy.md`
-- `{output_dir}/style.json`
-
-### Step 1.1: Create philosophy.md
-
-Create this file with ALL sections filled in:
-
+Create `philosophy.md`:
 ```markdown
 # Production Philosophy: [Project Name]
 
 ## Visual Identity
-- **Art Style**: [e.g., cinematic realistic, stylized animation, painterly]
-- **Color Palette**: [primary colors, mood, temperature]
-- **Lighting**: [natural, dramatic, soft, high-contrast]
-- **Composition**: [rule of thirds, centered, dynamic angles]
+- **Art Style**: [cinematic/animated/stylized]
+- **Color Palette**: [colors, mood, temperature]
+- **Lighting**: [natural/dramatic/soft]
 
 ## Motion Language
-- **Movement Quality**: [smooth/fluid, dynamic/energetic, subtle/minimal]
-- **Pacing**: [fast cuts, slow contemplative, rhythmic]
-- **Camera Style**: [static, tracking, handheld, cinematic sweeps]
-
-## Subject Consistency
-- **Characters/Products**: [detailed descriptions for consistency]
-- **Environment**: [setting details that persist across scenes]
-- **Props/Elements**: [recurring visual elements]
+- **Movement**: [smooth/dynamic/subtle]
+- **Pacing**: [fast/slow/rhythmic]
+- **Camera**: [static/tracking/handheld]
 
 ## Constraints
-- **Avoid**: [unwanted elements, styles, or actions]
-- **Maintain**: [elements that must stay consistent]
+- **Avoid**: [unwanted elements]
+- **Maintain**: [consistency requirements]
 ```
 
-### Step 1.2: Create style.json
-
-Create this file for programmatic use with generation scripts:
-
-```json
-{
-  "project_name": "Project Name Here",
-  "visual_style": {
-    "art_style": "description",
-    "color_palette": "description",
-    "lighting": "description",
-    "composition": "description"
-  },
-  "motion_language": {
-    "movement_quality": "description",
-    "pacing": "description",
-    "camera_style": "description"
-  },
-  "subject_consistency": {
-    "main_subject": "detailed description",
-    "environment": "detailed description"
-  },
-  "constraints": {
-    "avoid": ["list", "of", "things"],
-    "maintain": ["list", "of", "things"]
-  }
-}
-```
-
-### Step 1.3: CHECKPOINT - Get User Approval
-
-1. Inform user that `philosophy.md` and `style.json` have been created
-2. Use AskUserQuestion:
-   - **"Approve"** - Proceed to scene breakdown
-   - User selects **"Other"** to specify changes
-
-If user requests changes → make adjustments → ask again → repeat until approved
+Create `style.json` with same info in JSON format.
 
 ---
 
-## Phase 2: Scene Breakdown (REQUIRED)
+## Phase 2: Scene Breakdown
 
-**DO NOT PROCEED TO PHASE 3 UNTIL `scene-breakdown.md` EXISTS AND USER APPROVES**
+**See `examples/` folder for complete examples.**
 
-### Step 2.1: Analyze Video Requirements
-
-Before creating scenes, determine:
-- Total video duration needed
-- Number of scenes required (minimum 2 for videos > 5 seconds)
-- Key story beats or content moments
-- Transitions between scenes
-
-### Step 2.2: Create scene-breakdown.md
-
-**MANDATORY FORMAT - v3.0 Scene/Segment structure:**
-
+Create `scene-breakdown.md`:
 ```markdown
 # Scene Breakdown: [Project Name]
 
 ## Overview
-- **Total Duration**: [X seconds]
-- **Number of Scenes**: [N]
-- **Video Type**: [promotional/narrative/educational/etc.]
-- **Pipeline Mode**: Scene/Segment v3.0
-
----
+- **Duration**: [X seconds]
+- **Scenes**: [N]
+- **Genre**: [action/horror/drama/comedy/anime/fantasy/commercial]
 
 ## Scene Overview
-
-| Scene | Description | Camera | Transition | Duration |
-|-------|-------------|--------|------------|----------|
-| 1 | [Brief description] | [Camera type] | - | 5s |
-| 2 | [Brief description] | [Camera type] | cut/continuous | 5s |
-
----
+| Scene | Description | Shot | Transition | Duration |
+|-------|-------------|------|------------|----------|
+| 1 | [description] | [ELS/LS/MS/CU/ECU] | - | 5s |
+| 2 | [description] | [shot] | cut | 5s |
 
 ## Scenes
 
-### Scene N: [Title]
-
+### Scene 1: [Title]
 **Type**: character | landscape
-**Duration**: 5 seconds
-**Camera**: [static/tracking/pan/zoom]
-**Purpose**: [What this scene communicates]
+**Duration**: [3-8]s
+**Shot**: [ELS/LS/MLS/MS/MCU/CU/ECU] + [static/tracking/pan]
+**Purpose**: [setup/action/reaction/transition]
 
-**First Keyframe**: Generated (character scenes) OR Extracted (continuous landscape only)
-- Characters: [list IDs - REQUIRED if visible]
-- Background: [background ID]
+**Keyframe**: Generated | Extracted
+- Characters: [IDs]
+- Background: [ID]
 
 **Segments**:
-| ID | Motion | Duration |
-|----|--------|----------|
-| seg-Na | [Motion description] | 5s |
+| ID | Motion | Duration | Beat |
+|----|--------|----------|------|
+| seg-1a | [motion description] | 5s | action |
 
-**Transition to Next**: cut | continuous | fade
-
-[Repeat for all scenes]
+**Transition**: cut | continuous | fade | dissolve
 ```
 
-**Scene Type Explanation:**
-- `character`: Scenes with characters - MUST include character references in keyframe
-- `landscape`: Scenes without characters - can use extracted keyframes for continuous transitions
+### Shot Types
+| Shot | Frame | Use |
+|------|-------|-----|
+| ELS | Environment dominant | Establishing |
+| LS | Full body | Character in space |
+| MS | Waist up | Action, dialogue |
+| CU | Face | Emotion |
+| ECU | Single feature | Intensity |
 
-### Scene Count Guidelines
+### Segment Duration
+- **3-4s**: Quick action, impacts
+- **5s**: Standard (default)
+- **6-8s**: Establishing, emotional moments
 
-**WAN generates 5-second clips (81 frames at 16fps)**
+### Transitions
+- **cut**: Camera change (generated keyframe)
+- **continuous**: Same shot continues (extracted keyframe for landscape ONLY)
+- **fade/dissolve**: Time skip, dramatic (generated keyframe)
 
-| Total Video Length | Minimum Scenes | Recommended Scenes |
-|--------------------|----------------|-------------------|
-| 1-5 seconds | 1 | 1 |
-| 6-10 seconds | 2 | 2 |
-| 11-15 seconds | 3 | 3 |
-| 16-20 seconds | 4 | 4 |
-| 20+ seconds | 5+ | Break into 5s beats |
-
-### Step 2.3: CHECKPOINT - Get User Approval
-
-1. Inform user that `scene-breakdown.md` has been created with [N] scenes
-2. Use AskUserQuestion:
-   - **"Approve"** - Proceed to asset generation
-   - User selects **"Other"** to specify changes
-
-If user requests changes → make adjustments → ask again → repeat until approved
+**CRITICAL**: Character scenes MUST use generated keyframes with character references. Extracted keyframes cause identity drift.
 
 ---
 
-## Phase 2.5: Asset Generation (REQUIRED)
+## Phase 3: Pipeline Generation
 
-**DO NOT PROCEED TO PHASE 3 UNTIL `assets.json` EXISTS AND USER APPROVES**
-
-This phase creates reusable assets that maintain consistency across all scenes.
-
-### Step 2.5.1: Analyze Required Assets
-
-Review `scene-breakdown.md` and identify all unique:
-- Characters (each character that appears in scenes)
-- Backgrounds (each unique location/environment)
-- Styles (the visual style to apply consistently)
-- Objects (any recurring props or items)
-
-### Step 2.5.2: Create assets.json
-
-**MANDATORY FORMAT:**
-
-```json
-{
-  "characters": {
-    "samurai": {
-      "description": "Feudal Japanese warrior, red armor, stern expression, dark hair",
-      "identity_ref": "assets/characters/samurai.png"
-    }
-  },
-  "backgrounds": {
-    "temple_courtyard": {
-      "description": "Ancient temple with cherry blossoms, stone paths, morning light",
-      "ref_image": "assets/backgrounds/temple_courtyard.png"
-    }
-  },
-  "styles": {
-    "ghibli": {
-      "description": "Studio Ghibli anime aesthetic, soft colors, painterly",
-      "ref_image": "assets/styles/ghibli.png"
-    }
-  },
-  "objects": {
-    "katana": {
-      "description": "Traditional Japanese sword with black sheath",
-      "ref_image": "assets/objects/katana.png"
-    }
-  }
-}
-```
-
-### Step 2.5.3: Asset Generation
-
-Assets are generated via `execute_pipeline.py --stage assets`. This phase defines assets in `assets.json` for later execution.
-
-### Step 2.5.4: CHECKPOINT - Get User Approval
-
-1. Inform user that `assets.json` and asset images have been created
-2. Show the generated assets to user
-3. Use AskUserQuestion:
-   - **"Approve"** - Proceed to keyframe generation
-   - User selects **"Other"** to specify which assets need adjustment
-
-If user requests changes → regenerate specific assets → ask again → repeat until approved
-
----
-
-## Phase 3: Pipeline Generation (REQUIRED)
-
-**DO NOT PROCEED TO EXECUTION UNTIL `pipeline.json` EXISTS AND USER APPROVES**
-
-This phase consolidates all prompts into a single structured file that will be executed deterministically.
-
-### Step 3.1: Create pipeline.json
-
-Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create a complete pipeline.json.
-
-#### Pipeline Schema v3.0
+Create `pipeline.json` with ALL prompts defined before any generation:
 
 ```json
 {
   "version": "3.0",
   "project_name": "project-name",
-  "metadata": {
-    "created_at": "ISO timestamp",
-    "philosophy_file": "philosophy.md",
-    "style_file": "style.json",
-    "scene_breakdown_file": "scene-breakdown.md"
-  },
   "assets": {
     "characters": {
-      "protagonist": {
-        "prompt": "Character sheet description...",
-        "output": "assets/characters/protagonist.png",
+      "hero": {
+        "prompt": "Character description, A-pose, full body, white background",
+        "output": "assets/characters/hero.png",
         "status": "pending"
       }
     },
     "backgrounds": {
       "location": {
-        "prompt": "Background description...",
+        "prompt": "Environment description, no people",
         "output": "assets/backgrounds/location.png",
         "status": "pending"
       }
@@ -437,22 +160,22 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
     {
       "id": "scene-01",
       "description": "Scene description",
-      "camera": "medium shot",
+      "shot_type": "MS",
       "transition_from_previous": null,
       "first_keyframe": {
         "type": "generated",
-        "prompt": "Keyframe description...",
+        "prompt": "Keyframe description with character and background",
+        "characters": ["hero"],
         "background": "location",
-        "characters": ["protagonist"],
         "output": "keyframes/scene-01-start.png",
         "status": "pending"
       },
       "segments": [
         {
-          "id": "seg-01-a",
-          "motion_prompt": "Motion description...",
+          "id": "seg-01a",
+          "motion_prompt": "Motion description with physical details",
+          "duration": 5,
           "output_video": "scene-01/seg-a.mp4",
-          "output_keyframe": "keyframes/scene-01-seg-a-end.png",
           "status": "pending"
         }
       ],
@@ -467,492 +190,109 @@ Based on philosophy.md, style.json, scene-breakdown.md, and assets.json, create 
 }
 ```
 
-**Additional scene examples:**
-- **Cut transition:** `"transition_from_previous": {"type": "cut"}`
-- **Continuous (landscape only):** `"transition_from_previous": {"type": "continuous"}, "first_keyframe": {"type": "extracted"}`
-
-**v3.0 Schema Key Concepts:**
-
-| Field | Description |
-|-------|-------------|
-| `scenes[].first_keyframe.type` | `"generated"` = create new keyframe with character refs, `"extracted"` = use previous scene's end (landscape only!) |
-| `scenes[].first_keyframe.characters` | Array of character IDs to reference - **REQUIRED if character is visible** |
-| `scenes[].transition_from_previous` | `null` for first scene, or `{"type": "cut/continuous/fade/dissolve"}` |
-| `scenes[].segments[]` | Array of 5-second video chunks within the scene |
-| `segments[].output_keyframe` | Extracted last frame (required for all but last segment) |
-| `scenes[].output_video` | Merged video of all segments in this scene |
-| `final_video` | All scene videos merged with transitions |
-
-**Keyframe Type Selection (CRITICAL for consistency):**
-
-| Scene Content | `first_keyframe.type` | `characters` array | Notes |
-|---------------|----------------------|-------------------|-------|
-| Character fully visible | `"generated"` | Required | Include all visible characters |
-| Character partially visible (hands, clothing) | `"generated"` | Required | Include character for clothing/style consistency |
-| Landscape only (no characters) | `"generated"` or `"extracted"` | Optional | Can use extracted for continuous transitions |
-
-**Transition Types:**
-- `cut`: Hard cut (instant switch between scenes)
-- `continuous`: Seamless continuation - use `"extracted"` ONLY for landscape scenes, use `"generated"` with character refs for character scenes
-- `fade`: Fade through black (duration configurable, default 0.5s)
-- `dissolve`: Cross-dissolve (duration configurable, default 0.5s)
-
-### Step 3.2: Pipeline Prompt Writing Guidelines
-
-**For Character Prompts:**
-- Include full physical description (hair, eyes, clothing, distinguishing features)
-- Mention "anime style character sheet, A-pose, full body, white background"
-- Include multiple views: "front view, side view, back view"
-
-**For Background Prompts:**
-- Describe setting, lighting, atmosphere
-- Include "no people, establishing shot"
-- Match style from philosophy.md
-
-**For Keyframe Prompts:**
-- Use positional language: "On the left:", "On the right:", "In the center:"
-- Reference character appearance from assets
-- Include background context and lighting
-- Match style from philosophy.md
-
-**For Video Prompts (I2V Motion Prompts):**
-
-I2V models tend to produce static video. Use these rules:
-
-1. **Separate subject motion from camera motion** - describe both explicitly
-2. **Describe physical body movements** - "legs pumping", "arms swinging", not just "running"
-3. **Include environmental interaction** - "boots splashing through mud", "hair flowing in wind"
-4. **Avoid POV/first-person** - I2V struggles with perspective-based motion
-5. **Use motion verbs** - "sprinting" not "in motion"
-
-**Motion Prompt Structure:**
-```
-[SUBJECT] [ACTION VERB] [BODY PART DETAILS], [ENVIRONMENTAL INTERACTION], camera [CAMERA MOVEMENT]
-```
-
-**Example:** "soldier sprints through trench, legs driving forward, rifle bouncing against chest, mud splashing from boots, camera tracking from behind at shoulder height"
-
-**Camera Terms:** "tracking from behind", "dollying alongside", "pushing in slowly", "holding steady", "panning left/right", "tilting up/down"
-
-See `references/prompt-engineering.md` for detailed guidance.
-
-### Step 3.3: CHECKPOINT - Get User Approval
-
-1. Show the complete pipeline.json to user
-2. Highlight all prompts for review
-3. Use AskUserQuestion:
-   - **"Approve"** - Proceed to execution
-   - User selects **"Other"** to specify which prompts need adjustment
-
-If user requests changes → update pipeline.json → ask again → repeat until approved
-
 ---
 
-## Phase 4: Asset Execution
+## Phase 4-6: Execution
 
-**Execute asset generation using the pipeline executor.**
-
-### Step 4.1: Run Asset Stage
+Run stages with `execute_pipeline.py`:
 
 ```bash
+# Assets (characters, backgrounds)
 python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --stage assets
-```
 
-This will:
-- Generate all characters, backgrounds defined in pipeline.json
-- Automatically use `--free-memory` for each generation
-- Update status in pipeline.json as items complete
-
-### Step 4.2: Review Assets with VLM
-
-After execution completes, use the Read tool to view each generated asset:
-
-```
-1. View each character asset - verify appearance matches description
-2. View each background asset - verify setting and style
-```
-
-### Step 4.3: CHECKPOINT - Get User Approval
-
-1. Show generated assets to user (use Read tool to display images)
-2. Report on quality and any issues noticed
-3. Use AskUserQuestion:
-   - **"Approve"** - Proceed to keyframes
-   - User selects **"Other"** to specify which assets need regeneration
-
-If regeneration needed:
-1. Update the prompt in pipeline.json
-2. Run: `python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --regenerate <asset_id>`
-3. Review again → repeat until approved
-
----
-
-## Phase 5: Keyframe Execution
-
-**Execute keyframe generation using the pipeline executor.**
-
-### Step 5.1: Run Keyframe Stage
-
-```bash
+# Keyframes
 python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --stage keyframes
-```
 
-This will:
-- Generate all keyframes defined in pipeline.json
-- Reference assets by ID (resolved to file paths automatically)
-- Use `--free-memory` for EVERY keyframe (mandatory)
-- Update status in pipeline.json as items complete
-
-### Step 5.2: Review Keyframes with VLM
-
-After execution completes, use the Read tool to view each keyframe:
-
-```
-1. View each keyframe image
-2. Check character consistency with assets
-3. Check background consistency
-4. Check style matches philosophy
-```
-
-### Step 5.3: CHECKPOINT - Get User Approval
-
-1. Show generated keyframes to user (use Read tool to display images)
-2. Report on quality and consistency
-3. Use AskUserQuestion:
-   - **"Approve"** - Proceed to videos
-   - User selects **"Other"** to specify which keyframes need regeneration
-
-If regeneration needed:
-1. Update the prompt in pipeline.json
-2. Run: `python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --regenerate <KF-id>`
-3. Review again → repeat until approved
-
----
-
-## Phase 6: Video Execution
-
-**Execute video generation using the pipeline executor.**
-
-### Step 6.1: Run Video Stage
-
-```bash
+# Videos (generates and merges)
 python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --stage videos
+
+# Or run all
+python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --all
 ```
 
-This will:
-- Generate all videos defined in pipeline.json
-- Reference keyframes by ID (resolved to file paths automatically)
-- Use `--free-memory` only on first video (switching from image to video models)
-- Update status in pipeline.json as items complete
-
-### Step 6.2: CHECKPOINT - Get User Approval
-
-1. Inform user of generated video locations
-2. Use AskUserQuestion:
-   - **"Approve"** - Complete
-   - User selects **"Other"** to specify which videos need regeneration
-
-If regeneration needed:
-1. Update the prompt in pipeline.json
-2. Run: `python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --regenerate <scene-id>`
-3. Review again → repeat until approved
+**Regeneration:**
+```bash
+python {baseDir}/scripts/execute_pipeline.py {output_dir}/pipeline.json --regenerate <id>
+```
 
 ---
 
-## Phase 7: Review & Iterate
+## Motion Prompt Guidelines
 
-Handle any final adjustments requested by user.
+Structure: `[Subject] [Action] [Environment interaction], camera [movement]`
 
----
+**Good**: "Soldier sprints through trench, legs driving forward, mud splashing from boots, camera tracking from behind"
 
-## Reference: Keyframe Generation Details
+**Bad**: "Soldier runs" (too vague, no physical detail)
 
-**The following sections provide reference information used by the pipeline executor.**
+**Key principles:**
+- Describe physical body mechanics
+- Include environmental interaction
+- Specify camera movement separately
+- Use active verbs: sprints, lunges, crashes, drifts
 
-### v3.0 Keyframe Strategy
-
-In Scene/Segment v3.0 mode:
-- Each scene has ONE first keyframe (generated or extracted)
-- Video generation uses I2V: first keyframe + motion prompt → video
-- End frames are automatically extracted from generated videos
-
-```
-Scene 1 (cut)         Scene 2 (cut)         Scene 3 (continuous)
-┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-│ KF generated│       │ KF generated│       │ KF extracted│
-│     ↓       │       │     ↓       │       │     ↓       │
-│ I2V video   │ ──→   │ I2V video   │ ──→   │ I2V video   │
-│     ↓       │       │     ↓       │       │     ↓       │
-│ End extract │       │ End extract │       │ End extract │
-└─────────────┘       └─────────────┘       └─────────────┘
-```
-
-### Scene Type and Keyframe Rules
-
-| Scene Type | Keyframe Type | Character Refs | Notes |
-|------------|---------------|----------------|-------|
-| `character` (any character visible) | Generated | REQUIRED | Always re-anchor identity |
-| `landscape` (no characters) | Generated or Extracted | Optional | Can use extracted for continuous |
-
-### Reference Chain Rules
-
-**These rules ensure consistency across scenes:**
-
-| Asset Type | Chain Behavior |
-|------------|----------------|
-| **Character Identity** | ALWAYS use original asset from `assets/characters/` (never chain) |
-| **Background** | Chain from previous scene's background for continuity |
-| **Style** | ALWAYS apply with style asset reference |
-
-### Character Consistency Rules (CRITICAL)
-
-**Problem:** Without character references, I2V models cause "identity drift" - clothing colors change, styles shift, and characters become unrecognizable across scenes.
-
-**Solution:** Include character references for ANY scene where the character is visible, even partially.
-
-**When to include character references:**
-
-| What's Visible | Include Character Reference? | Example |
-|----------------|------------------------------|---------|
-| Full body | YES | Wide shot of character walking |
-| Upper body only | YES | Medium shot conversation |
-| Hands only | YES | Close-up of hands holding object |
-| Clothing only (no face) | YES | Back view of character running |
-| Character's belongings | Optional | Close-up of character's bag |
-| No character elements | NO | Landscape, building exterior |
-
-**Common Mistakes:**
-- Close-up of hands without character reference → clothing inconsistency
-- Using `"type": "extracted"` for character scenes → identity drift
-
-**The Character Drift Problem:** Without character references, each scene accumulates deviations. By Scene 4, character may have different clothing color/style.
-
-**Solution:** Always use `"type": "generated"` with `"characters": ["id"]` for any scene with visible character parts.
-
-### Reference Slot Allocation
-
-The keyframe generator uses 3 reference image slots:
-
-| Slot | Without --background | With --background |
-|------|---------------------|-------------------|
-| image1 | Character 1 | Background |
-| image2 | Character 2 | Character 1 |
-| image3 | Character 3 | Character 2 |
-
-**Note:** With `--background`, maximum 2 characters are supported (3 slots total).
-
-### Character Count Decision Matrix
-
-The system has 3 reference image slots. Use this matrix to determine the approach:
-
-| # Characters | Background | Approach |
-|--------------|------------|----------|
-| 0 | Any | Use `landscape` type with `asset_generator.py background` |
-| 1 | No | `--character A` (empty slots auto-filled with fallback) |
-| 1 | Yes | `--background B --character A` (empty slot auto-filled) |
-| 2 | No | `--character A --character B` (slot 3 auto-filled) |
-| 2 | Yes | `--background B --character A --character B` (all slots used) |
-| 3 | No | `--character A --character B --character C` (all slots used) |
-| 3+ | Yes | **Workaround required** - see below |
-| 4+ | Any | **Workaround required** - see below |
-
-**Handling 3+ Characters with Background OR 4+ Characters:**
-
-When exceeding 3 reference slots:
-1. Select 2-3 most important characters for reference slots
-2. Describe ALL characters in prompt with positional language
-3. Trade-off: Referenced characters have strong identity; others rely on prompt
-
-### Keyframe Quality Checklist
-
-Before proceeding to video, verify EACH keyframe:
-- Subject appears correctly (no distortion)
-- Style matches Production Philosophy
-- Composition allows for intended motion
-- Characters are consistent with assets
-- Background/environment is consistent
-- Lighting direction is consistent
-
-**Key Rule:** NEVER chain keyframes as references - always use original assets from `assets/characters/`
+See `references/prompt-engineering.md` for genre-specific guidance.
 
 ---
 
-## Output Directory Structure (REQUIRED)
+## Genre Templates
+
+| Genre | Pacing | Key Techniques |
+|-------|--------|----------------|
+| Action | 3-5s variable | Wide→close→wide, tracking, smash cuts |
+| Horror | 6-8s slow | Dutch angles, negative space, low-key light |
+| Drama | 5s standard | Two-shots, slow push-ins, reaction holds |
+| Comedy | 3-5s quick | Wide for physical, static camera |
+| Anime | Variable | Speed lines, impact frames, dramatic poses |
+| Fantasy | 6-8s epic | Sweeping cameras, low heroic angles |
+| Commercial | 3-5s fast | Hero shots, 360 orbits, clean lighting |
+
+See `references/genre-templates.md` for full details.
+
+---
+
+## Output Structure
 
 ```
 {output_dir}/
-├── philosophy.md              # Production philosophy
-├── style.json                 # Style configuration
-├── scene-breakdown.md         # Scene breakdown with segments
-├── pipeline.json              # v3.0 pipeline definition
-│
-├── assets/                    # Reusable character/background assets
+├── philosophy.md
+├── style.json
+├── scene-breakdown.md
+├── pipeline.json
+├── assets/
 │   ├── characters/
-│   │   ├── protagonist.png
-│   │   └── sidekick.png
 │   └── backgrounds/
-│       ├── city_street.png
-│       └── rooftop.png
-│
-├── keyframes/                 # Scene start keyframes + extracted end frames
-│   ├── scene-01-start.png    # Generated from assets
-│   ├── scene-01-seg-a-end.png # Extracted from video
-│   ├── scene-02-start.png    # Generated (cut) or extracted (continuous)
-│   └── scene-02-seg-a-end.png
-│
+├── keyframes/
 ├── scene-01/
-│   ├── seg-a.mp4             # Segment video
-│   └── merged.mp4            # Scene merged video
-│
-├── scene-02/
-│   ├── seg-a.mp4
 │   └── merged.mp4
-│
 └── final/
-    └── video.mp4             # All scenes merged
+    └── video.mp4
 ```
-
-**Note:** Each scene has one start keyframe. End frames are extracted from generated videos, not pre-generated.
-
----
-
-## TodoWrite Template
-
-At the START of the workflow, create the appropriate todo list based on selected approval mode:
-
-### Manual Approval Mode
-```
-1. Ask user to select approval mode (Manual/Automatic)
-2. Check ComfyUI setup and start server
-3. Create philosophy.md and style.json
-4. Get user approval on production philosophy
-5. Create scene-breakdown.md
-6. Get user approval on scene breakdown
-7. Create pipeline.json (v3.0 schema)
-8. Get user approval on pipeline.json
-9. Execute assets stage, review with VLM, get user approval
-10. Execute keyframes stage, review with VLM, get user approval
-11. Execute scenes stage, get user approval
-12. Provide final summary
-```
-
-### Automatic Approval Mode
-```
-1. Ask user to select approval mode (Manual/Automatic)
-2. Check ComfyUI setup and start server
-3. Create philosophy.md and style.json
-4. Create scene-breakdown.md
-5. Create pipeline.json (v3.0 schema)
-6. Execute assets stage, review with VLM
-7. Execute keyframes stage, review with VLM
-8. Execute scenes stage
-9. Present final output to user for review
-```
-
-**Key points:**
-- ALL prompts are written to pipeline.json BEFORE any generation starts
-- execute_pipeline.py handles VRAM management automatically
-- LLM always reviews outputs with VLM (both modes)
-- In Auto mode, LLM proceeds unless VLM detects issues
-
-### Setup Verification (Step 1)
-
-```bash
-python {baseDir}/scripts/setup_comfyui.py --check   # Verify setup
-python {baseDir}/scripts/setup_comfyui.py --start   # Start ComfyUI server
-```
-
-### VRAM Management
-
-**Note:** `execute_pipeline.py` handles VRAM management automatically with `--free-memory` flags.
-The Qwen image model and WAN video model cannot both fit in 10GB VRAM simultaneously - the executor handles this.
 
 ---
 
 ## Quick Reference
 
-| Script | Purpose | Key Arguments |
-|--------|---------|---------------|
-| `execute_pipeline.py` | Execute complete pipeline | `--stage`, `--all`, `--status`, `--validate`, `--regenerate` |
-| `asset_generator.py` | Generate reusable assets | `character`, `background`, `style` subcommands |
-| `keyframe_generator.py` | Generate keyframes with character references | `--prompt`, `--character`, `--background`, `--output` |
-| `angle_transformer.py` | Transform keyframe camera angles | `--input`, `--output`, `--rotate`, `--tilt`, `--zoom` |
-| `wan_video_comfyui.py` | Generate videos (WAN 2.1 I2V) | `--prompt`, `--start-frame`, `--output`, `--free-memory` |
-| `video_merger.py` | Merge videos with transitions | `--concat`, `--output`, `--transition`, `--duration` |
-| `setup_comfyui.py` | Setup and manage ComfyUI | `--check`, `--start`, `--models` |
+| Script | Purpose |
+|--------|---------|
+| `execute_pipeline.py` | Run pipeline stages |
+| `setup_comfyui.py` | Setup/start ComfyUI |
 
-### Pipeline Execution
+| Stage | Command |
+|-------|---------|
+| Assets | `--stage assets` |
+| Keyframes | `--stage keyframes` |
+| Videos | `--stage videos` |
+| All | `--all` |
+| Regenerate | `--regenerate <id>` |
 
-| Stage | Command | Description |
-|-------|---------|-------------|
-| Assets | `--stage assets` | Generate character sheets and backgrounds |
-| Scene Keyframes | `--stage scene_keyframes` | Generate keyframes for each scene |
-| Scenes | `--stage scenes` | Generate videos, merge segments, create final video |
-| All stages | `--all` | Run complete pipeline |
-
-**Key Features:**
-- Scene keyframes generated for "cut" transitions, extracted for "continuous" (landscape only)
-- Segments within scenes merged automatically
-- Final video assembled with transitions (cut/fade/dissolve)
-
-### Asset Generation
-
-| Asset Type | Command | Output |
-|------------|---------|--------|
-| **Character** | `asset_generator.py character --name X --description "..." -o path` | Neutral A-pose, white background |
-| **Background** | `asset_generator.py background --name X --description "..." -o path` | Environment, no people |
-| **Style** | `asset_generator.py style --name X --description "..." -o path` | Style reference |
-
-### Keyframe Generation
-
-**IMPORTANT:** Always use `--free-memory` for every keyframe generation to prevent VRAM fragmentation.
-
-| Mode | Command | Description |
-|------|---------|-------------|
-| **Single Character** | `keyframe_generator.py --free-memory --character X --prompt "..."` | Character from reference |
-| **Multi-Character** | `keyframe_generator.py --free-memory --character A --character B --prompt "..."` | Up to 3 characters |
-| **With Background** | `keyframe_generator.py --free-memory --background B --character X --character Y ...` | Background + 2 chars |
-
-### Camera Angle Transformation
-
-Transform keyframes using `angle_transformer.py`:
-- `--rotate`: -180 to 180 (horizontal rotation, negative = left)
-- `--tilt`: -90 to 90 (vertical tilt, negative = look up)
-- `--zoom`: wide/normal/close
-- Requires Multi-Angle LoRA
-
-### Video Generation (I2V Mode)
-
-This skill uses **Image-to-Video (I2V)** mode exclusively:
-- Input: Start keyframe + Motion prompt
-- Output: Video + Extracted end frame
-
-### Video Model Selection
-
-| Flag | Time | Quality | When to Use |
-|------|------|---------|-------------|
-| (none) | ~6 min | Good | Fast generation |
-| `--moe-fast` | ~7 min | Better | **RECOMMENDED** - Best balance with ALG motion enhancement |
-| `--moe` | ~30 min | Best | Maximum quality when time not critical |
-
-**Motion Limitations:** I2V preserves the subject's pose from input image. For dynamic poses, keyframe must show subject mid-action. Camera motion works better than body motion.
-
-### Technical Specs
-
-| Parameter | Value |
-|-----------|-------|
-| Video Duration | ~5 seconds (81 frames) |
-| Frame Rate | 16 fps |
-| Resolution | Up to 832x480 (medium preset) |
-| VRAM Required | 10GB (GGUF Q4_K_M quantization) |
-| Image Steps | 4 (with Lightning LoRA) |
-| Video Steps | 8 (with LightX2V LoRA) |
+**Video Specs:** 5s per segment, 81 frames, 16fps, up to 832x480
 
 ---
 
 ## References
 
-- `references/models.md` - Model specifications and sizes
-- `references/prompt-engineering.md` - Detailed prompt writing guidance
-- `references/troubleshooting.md` - Common issues and solutions
-- `README.md` - Installation instructions
+- `references/genre-templates.md` - Full cinematography guides
+- `references/prompt-engineering.md` - Prompt writing (includes genre-specific)
+- `references/models.md` - Model specifications
+- `examples/` - Complete scene breakdown examples
